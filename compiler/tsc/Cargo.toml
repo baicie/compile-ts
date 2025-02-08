@@ -1,0 +1,15 @@
+[package]
+name = "tsc-main"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+tsc-driver-impl = { path = "../tsc_driver_impl" }
+# clap = { version = "4.5.28", features = ["derive"] }
+
+[build-dependencies]
+pkg-config = "0.3"
+
+[target.'cfg(target_os = "macos")'.build]
+rustc-link-search = ["/opt/homebrew/lib"]
+rustc-link-lib = ["zstd"]
