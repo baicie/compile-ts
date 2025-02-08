@@ -1,6 +1,5 @@
 mod codegen;
 mod module_resolver;
-mod symbol_table;
 mod type_checker;
 mod types;
 

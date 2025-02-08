@@ -1,16 +1,11 @@
-use crate::symbol_table::SymbolTable;
 use crate::types::Type;
 use oxc_ast::ast::*;
 
-pub struct TypeChecker {
-    symbol_table: SymbolTable,
-}
+pub struct TypeChecker {}
 
 impl TypeChecker {
     pub fn new() -> Self {
-        TypeChecker {
-            symbol_table: SymbolTable::new(),
-        }
+        TypeChecker {}
     }
 
     pub fn check(&mut self, program: &Program) -> Result<Type, String> {
