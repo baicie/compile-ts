@@ -8,3 +8,9 @@ inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", feat
     "llvm14-0",
 ] }
 clap = { version = "4.5.28", features = ["derive"] }
+oxc_parser = "0.48.2"
+oxc_ast = "0.48.2"
+oxc_span = "0.48.2"
+oxc_allocator = "0.48.2"
+oxc_semantic = "0.48.2"
+oxc_resolver = "4.0.0"

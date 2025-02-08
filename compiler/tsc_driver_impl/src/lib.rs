@@ -1,6 +1,16 @@
+mod codegen;
+mod module_resolver;
+mod symbol_table;
+mod type_checker;
+mod types;
+
+use codegen::CodeGenerator;
+use module_resolver::ModuleResolver;
+use type_checker::TypeChecker;
+
 use clap::{Arg, Command};
 use inkwell::context::Context;
-use std::fs;
+use std::path::PathBuf;
 use std::process::{self};
 use std::time::Instant;
 
@@ -22,50 +32,51 @@ impl Default for CompilerOptions {
 }
 
 pub fn run_compiler(options: CompilerOptions) -> i32 {
-    let source_code = fs::read_to_string(&options.input_file).expect("Failed to read input file");
+    let entry_point = PathBuf::from(&options.input_file);
+    let mut resolver = ModuleResolver::new(entry_point);
 
-    // 词法分析
-    let lexer = Lexer::new(source_code);
-    let mut parser = Parser::new(lexer);
+    // 解析所有相关模块
+    if let Err(e) = resolver.resolve_all() {
+        println!("Module resolution error: {}", e);
+        return 1;
+    }
 
-    // 语法分析
-    let ast = parser.parse_program();
-
-    // 类型检查
+    // 对所有模块进行类型检查
     let mut type_checker = TypeChecker::new();
-    match type_checker.check(&ast) {
-        Ok(_) => println!("Type checking passed"),
-        Err(e) => {
-            println!("Type error: {}", e);
+    for (path, program) in resolver.get_all_modules() {
+        match type_checker.check(program) {
+            Ok(_) => println!("Type checking passed for {}", path.display()),
+            Err(e) => {
+                println!("Type error in {}: {}", path.display(), e);
+                return 1;
+            }
+        }
+    }
+
+    // 生成代码
+    let context = Context::create();
+    let mut code_generator = CodeGenerator::new(&context, "output");
+
+    // 为每个模块生成代码
+    for (_, program) in resolver.get_all_modules() {
+        if let Err(e) = code_generator.generate(program) {
+            println!("Code generation error: {}", e);
             return 1;
         }
     }
 
-    // 生成 LLVM IR
-    let context = Context::create();
-    let mut code_generator = CodeGenerator::new(&context, "output");
-    match code_generator.generate(&ast) {
-        Ok(_) => {
-            println!("LLVM IR generated successfully");
+    // 优化
+    code_generator.optimize();
+    println!("Optimization completed");
 
-            // 优化
-            code_generator.optimize();
-            println!("Optimization completed");
+    // 输出 IR (用于调试)
+    code_generator.print_to_file("output.ll");
 
-            // 输出 IR (用于调试)
-            code_generator.print_to_file("output.ll");
-
-            // 生成目标文件
-            match code_generator.generate_object_file("output.o", options.target) {
-                Ok(_) => println!("Object file generated successfully"),
-                Err(e) => {
-                    println!("Failed to generate object file: {}", e);
-                    return 1;
-                }
-            }
-        }
+    // 生成目标文件
+    match code_generator.generate_object_file("output.o", options.target) {
+        Ok(_) => println!("Object file generated successfully"),
         Err(e) => {
-            println!("Code generation error: {}", e);
+            println!("Failed to generate object file: {}", e);
             return 1;
         }
     }
@@ -109,15 +120,3 @@ pub fn main() {
 
     process::exit(exit_code)
 }
-
-pub mod codegen;
-pub mod lexer;
-pub mod parser;
-pub mod symbol_table;
-pub mod type_checker;
-pub mod types;
-
-use codegen::CodeGenerator;
-pub use lexer::{Lexer, Token, TokenKind};
-use parser::Parser;
-use type_checker::TypeChecker;

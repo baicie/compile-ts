@@ -1,10 +1,10 @@
-use crate::parser::AstNode;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::targets::{InitializationConfig, Target, TargetMachine, TargetTriple};
 use inkwell::values::BasicValueEnum;
 use inkwell::OptimizationLevel;
+use oxc_ast::ast::{Expression, Program, Statement};
 use std::collections::HashMap;
 
 pub struct CodeGenerator<'ctx> {
@@ -37,32 +37,26 @@ impl<'ctx> CodeGenerator<'ctx> {
         }
     }
 
-    pub fn generate(&mut self, ast: &AstNode) -> Result<(), String> {
-        match ast {
-            AstNode::Program(statements) => {
-                // 创建主函数
-                let i64_type = self.context.i64_type();
-                let fn_type = i64_type.fn_type(&[], false);
-                let function = self.module.add_function("main", fn_type, None);
-                let basic_block = self.context.append_basic_block(function, "entry");
+    pub fn generate(&mut self, program: &Program) -> Result<(), String> {
+        // 创建主函数
+        let i64_type = self.context.i64_type();
+        let fn_type = i64_type.fn_type(&[], false);
+        let function = self.module.add_function("main", fn_type, None);
+        let basic_block = self.context.append_basic_block(function, "entry");
 
-                // 设置插入点
-                self.builder.position_at_end(basic_block);
+        self.builder.position_at_end(basic_block);
 
-                // 生成语句
-                for stmt in statements {
-                    self.generate_statement(stmt)?;
-                }
-
-                // 添加返回语句
-                self.builder
-                    .build_return(Some(&i64_type.const_int(0, false)))
-                    .map_err(|e| e.to_string())?;
-
-                Ok(())
-            }
-            _ => Err("Expected program".to_string()),
+        // 生成语句
+        for stmt in &program.body {
+            self.generate_statement(stmt)?;
         }
+
+        // 添加返回语句
+        self.builder
+            .build_return(Some(&i64_type.const_int(0, false)))
+            .map_err(|e| e.to_string())?;
+
+        Ok(())
     }
 
     fn generate_console_log(&self, value: BasicValueEnum<'ctx>) -> Result<(), String> {
@@ -87,109 +81,66 @@ impl<'ctx> CodeGenerator<'ctx> {
         Ok(())
     }
 
-    fn generate_statement(&mut self, node: &AstNode) -> Result<(), String> {
-        match node {
-            AstNode::FunctionDecl { name, params, body } => {
-                let i64_type = self.context.i64_type();
-                let param_types: Vec<_> = params.iter().map(|_| i64_type.into()).collect();
-                let fn_type = i64_type.fn_type(&param_types, false);
-
-                let function = self.module.add_function(name, fn_type, None);
-                let basic_block = self.context.append_basic_block(function, "entry");
-                self.builder.position_at_end(basic_block);
-
-                for stmt in body {
-                    self.generate_statement(stmt)?;
-                }
-                Ok(())
-            }
-            AstNode::ReturnStmt(expr) => {
-                let return_value = self.generate_expression(expr)?;
-                self.builder
-                    .build_return(Some(&return_value))
-                    .map_err(|e| e.to_string())?;
-                Ok(())
-            }
-            AstNode::VariableDecl { name, initializer } => {
-                let value = self.generate_expression(initializer)?;
-                let alloca = self
-                    .builder
-                    .build_alloca(self.context.i64_type(), name)
-                    .map_err(|e| e.to_string())?;
-                self.builder
-                    .build_store(alloca, value)
-                    .map_err(|e| e.to_string())?;
-                self.variables.insert(name.clone(), alloca);
-                Ok(())
-            }
-            AstNode::ExpressionStmt(expr) => {
-                self.generate_expression(expr)?;
-                Ok(())
-            }
-            AstNode::CallExpr { callee, args } => {
-                if callee == "console.log" {
-                    if let Some(arg) = args.first() {
-                        let value = self.generate_expression(arg)?;
-                        self.generate_console_log(value)?;
+    fn generate_statement(&mut self, stmt: &Statement) -> Result<(), String> {
+        match stmt {
+            Statement::VariableDeclaration(var_decl) => {
+                for decl in &var_decl.declarations {
+                    if let Some(init) = &decl.init {
+                        let value = self.generate_expression(init)?;
+                        let name = decl.id.get_identifier_name().unwrap().to_string();
+                        let alloca = self
+                            .builder
+                            .build_alloca(self.context.i64_type(), &name)
+                            .map_err(|e| e.to_string())?;
+                        self.builder
+                            .build_store(alloca, value)
+                            .map_err(|e| e.to_string())?;
+                        self.variables.insert(name.to_string(), alloca);
                     }
-                    Ok(())
-                } else {
-                    Err("Unsupported function call".to_string())
                 }
+                Ok(())
             }
-            _ => Err(format!("Unsupported statement type: {:?}", node)),
+            Statement::ExpressionStatement(expr_stmt) => {
+                self.generate_expression(&expr_stmt.expression)?;
+                Ok(())
+            }
+            _ => Err(format!("Unsupported statement type: {:?}", stmt)),
         }
     }
 
-    fn generate_expression(&mut self, node: &AstNode) -> Result<BasicValueEnum<'ctx>, String> {
-        match node {
-            AstNode::BinaryExpr {
-                left,
-                operator,
-                right,
-            } => {
-                let l = self.generate_expression(left)?;
-                let r = self.generate_expression(right)?;
-
-                match operator.as_str() {
-                    "Plus" => Ok(self
-                        .builder
-                        .build_int_add(l.into_int_value(), r.into_int_value(), "addtmp")
-                        .map_err(|e| e.to_string())?
-                        .into()),
-                    "Minus" => Ok(self
-                        .builder
-                        .build_int_sub(l.into_int_value(), r.into_int_value(), "subtmp")
-                        .map_err(|e| e.to_string())?
-                        .into()),
-                    _ => Err("Unsupported operator".to_string()),
-                }
-            }
-            AstNode::NumberLiteral(n) => {
-                Ok(self.context.i64_type().const_int(*n as u64, false).into())
-            }
-            AstNode::Identifier(name) => {
-                if let Some(val) = self.variables.get(name) {
+    fn generate_expression(&mut self, expr: &Expression) -> Result<BasicValueEnum<'ctx>, String> {
+        match expr {
+            Expression::NumericLiteral(num) => Ok(self
+                .context
+                .i64_type()
+                .const_int(num.value as u64, false)
+                .into()),
+            Expression::Identifier(ident) => {
+                if let Some(val) = self.variables.get(ident.name.as_str()) {
                     Ok(self
                         .builder
-                        .build_load(*val, name)
+                        .build_load(*val, ident.name.as_str())
                         .map_err(|e| e.to_string())?)
                 } else {
-                    Err(format!("Undefined variable: {}", name))
+                    Err(format!("Undefined variable: {}", ident.name))
                 }
             }
-            AstNode::CallExpr { callee, args } => {
-                if callee == "console.log" {
-                    if let Some(arg) = args.first() {
-                        let value = self.generate_expression(arg)?;
-                        self.generate_console_log(value)?;
-                        Ok(self.context.i64_type().const_int(0, false).into())
-                    } else {
-                        Err("console.log requires an argument".to_string())
+            Expression::CallExpression(call) => {
+                if let Expression::StaticMemberExpression(member) = &call.callee {
+                    if let Expression::Identifier(obj) = &member.object {
+                        if obj.name.as_str() == "console" && member.property.name.as_str() == "log"
+                        {
+                            if let Some(arg) = call.arguments.first() {
+                                if let Some(expr) = arg.as_expression() {
+                                    let value = self.generate_expression(expr)?;
+                                    self.generate_console_log(value)?;
+                                    return Ok(self.context.i64_type().const_int(0, false).into());
+                                }
+                            }
+                        }
                     }
-                } else {
-                    Err("Unsupported function call".to_string())
                 }
+                Err("Unsupported function call".to_string())
             }
             _ => Err("Unsupported expression type".to_string()),
         }
