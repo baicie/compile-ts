@@ -1,11 +1,8 @@
 mod codegen;
 mod module_resolver;
-mod type_checker;
-mod types;
 
 use codegen::CodeGenerator;
 use module_resolver::ModuleResolver;
-use type_checker::TypeChecker;
 
 use clap::{Arg, Command};
 use inkwell::context::Context;
@@ -40,17 +37,17 @@ pub fn run_compiler(options: CompilerOptions) -> i32 {
         return 1;
     }
 
-    // 对所有模块进行类型检查
-    let mut type_checker = TypeChecker::new();
-    for (path, program) in resolver.get_all_modules() {
-        match type_checker.check(program) {
-            Ok(_) => println!("Type checking passed for {}", path.display()),
-            Err(e) => {
-                println!("Type error in {}: {}", path.display(), e);
-                return 1;
-            }
-        }
-    }
+    // // 对所有模块进行类型检查
+    // let mut type_checker = TypeChecker::new();
+    // for (path, program) in resolver.get_all_modules() {
+    //     match type_checker.check(program) {
+    //         Ok(_) => println!("Type checking passed for {}", path.display()),
+    //         Err(e) => {
+    //             println!("Type error in {}: {}", path.display(), e);
+    //             return 1;
+    //         }
+    //     }
+    // }
 
     // 生成代码
     let context = Context::create();
