@@ -1,4 +1,5 @@
 mod codegen;
+mod gc;
 mod module_resolver;
 
 use codegen::CodeGenerator;
@@ -62,15 +63,35 @@ pub fn run_compiler(options: CompilerOptions) -> i32 {
     }
 
     // 优化
-    code_generator.optimize();
-    println!("Optimization completed");
+    // code_generator.optimize();
+    // println!("Optimization completed");
+
+    // 创建输出目录
+    let output_dir = PathBuf::from("target");
+    std::fs::create_dir_all(&output_dir).expect("Failed to create output directory");
 
     // 输出 IR (用于调试)
-    code_generator.print_to_file("output.ll");
+    let ir_path = output_dir.join("output.ll");
+    code_generator.print_to_file(ir_path.to_str().unwrap());
 
     // 生成目标文件
-    match code_generator.generate_object_file("output.o", options.target) {
-        Ok(_) => println!("Object file generated successfully"),
+    let obj_path = output_dir.join("output.o");
+    let exe_path = output_dir.join("output");
+    match code_generator.generate_object_file(obj_path.to_str().unwrap(), options.target) {
+        Ok(_) => {
+            println!("Object file generated successfully");
+            // 链接生成可执行文件
+            if let Err(e) = std::process::Command::new("cc")
+                .arg(obj_path)
+                .arg("-o")
+                .arg(exe_path)
+                .output()
+            {
+                println!("Failed to link: {}", e);
+                return 1;
+            }
+            println!("Executable generated successfully");
+        }
         Err(e) => {
             println!("Failed to generate object file: {}", e);
             return 1;

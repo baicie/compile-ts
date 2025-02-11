@@ -1,3 +1,4 @@
+use crate::gc::GarbageCollector;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
@@ -12,6 +13,7 @@ pub struct CodeGenerator<'ctx> {
     module: Module<'ctx>,
     builder: Builder<'ctx>,
     variables: HashMap<String, inkwell::values::PointerValue<'ctx>>,
+    gc: GarbageCollector<'ctx>,
 }
 
 impl<'ctx> CodeGenerator<'ctx> {
@@ -34,6 +36,7 @@ impl<'ctx> CodeGenerator<'ctx> {
             module,
             builder,
             variables: HashMap::new(),
+            gc: GarbageCollector::new(),
         }
     }
 
@@ -92,10 +95,14 @@ impl<'ctx> CodeGenerator<'ctx> {
                             .builder
                             .build_alloca(self.context.i64_type(), &name)
                             .map_err(|e| e.to_string())?;
+
+                        // 将对象添加到 GC
+                        self.gc.alloc_object(&name, alloca);
+
                         self.builder
                             .build_store(alloca, value)
                             .map_err(|e| e.to_string())?;
-                        self.variables.insert(name.to_string(), alloca);
+                        self.variables.insert(name.clone(), alloca);
                     }
                 }
                 Ok(())
@@ -119,7 +126,7 @@ impl<'ctx> CodeGenerator<'ctx> {
                 if let Some(val) = self.variables.get(ident.name.as_str()) {
                     Ok(self
                         .builder
-                        .build_load(*val, ident.name.as_str())
+                        .build_load(self.context.i64_type(), *val, ident.name.as_str())
                         .map_err(|e| e.to_string())?)
                 } else {
                     Err(format!("Undefined variable: {}", ident.name))
@@ -152,16 +159,12 @@ impl<'ctx> CodeGenerator<'ctx> {
             .expect("Failed to write IR to file");
     }
 
-    pub fn optimize(&self) {
-        use inkwell::passes::PassManagerBuilder;
-
-        let builder = PassManagerBuilder::create();
-        builder.set_optimization_level(OptimizationLevel::Aggressive);
-
-        let pass_manager = inkwell::passes::PassManager::create(());
-        builder.populate_module_pass_manager(&pass_manager);
-        pass_manager.run_on(&self.module);
-    }
+    // pub fn optimize(&self) {
+    //     use inkwell::passes::PassManager;
+    //     let pass_manager = PassManager::create(&self.module);
+    //     pass_manager.initialize();
+    //     pass_manager.run_on_module(&self.module);
+    // }
 
     pub fn generate_object_file(
         &self,
@@ -198,5 +201,17 @@ impl<'ctx> CodeGenerator<'ctx> {
                 filename.as_ref(),
             )
             .map_err(|e| e.to_string())
+    }
+}
+
+impl<'ctx> Drop for CodeGenerator<'ctx> {
+    fn drop(&mut self) {
+        // 清理所有堆对象
+        for name in self.variables.keys() {
+            if self.gc.decrement_ref(name) {
+                // 对象的引用计数为0，可以释放
+                println!("Cleaning up object: {}", name);
+            }
+        }
     }
 }

@@ -1,3 +1,7 @@
 [workspace]
 resolver = "2"
-members = ["compiler/tsc", "compiler/tsc_driver_impl"]
+members = [
+    "compiler/tsc",
+    "compiler/tsc_codegen_llvm",
+    "compiler/tsc_driver_impl",
+]
