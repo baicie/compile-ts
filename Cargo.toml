@@ -1,7 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "compiler/tsc",
-    "compiler/tsc_codegen_llvm",
-    "compiler/tsc_driver_impl",
+    "compiler/zw",
+    "compiler/zw_allocator",
 ]
+
+[workspace.dependencies]
+
+bumpalo = "3.17.0"
