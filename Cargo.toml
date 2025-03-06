@@ -3,8 +3,11 @@ resolver = "2"
 members = [
     "compiler/zw",
     "compiler/zw_allocator",
+    "compiler/zw_data_structures",
+    "compiler/zw_estree",
 ]
 
 [workspace.dependencies]
 
 bumpalo = "3.17.0"
+assert-unchecked = "0.1.2"
