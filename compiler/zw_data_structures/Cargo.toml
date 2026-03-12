@@ -1,7 +1,0 @@
-[package]
-name = "zw_data_structures"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-assert-unchecked = { workspace = true }
