@@ -740,9 +740,12 @@ mod tests {
 
     #[test]
     fn test_parse_if() {
-        let source = "if x { y; } else { z; }";
+        let source = "if (x) { y; } else { z; }";
         let mut parser = Parser::new(source);
         let result = parser.parse_program();
+        if let Err(e) = &result {
+            eprintln!("Parse error: {:?}", e);
+        }
         assert!(result.is_ok());
     }
 

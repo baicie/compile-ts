@@ -131,21 +131,22 @@ impl<'a> Lexer<'a> {
 
     /// 跳过单行注释
     fn skip_comment(&mut self) {
-        if let Some(&ch) = self.peek_char() {
+        // 使用 peek 检查是否是注释，不提前消费字符
+        let mut iter = self.source.clone();
+        if let Some(&ch) = iter.peek() {
             if ch == '/' {
-                self.next_char();
-                if let Some(&next) = self.peek_char() {
+                iter.next(); // 暂时消费 /
+                if let Some(&next) = iter.peek() {
                     if next == '/' {
-                        // 单行注释 //
-                        while let Some(&c) = self.peek_char() {
-                            self.next_char();
+                        // 单行注释 //，消费直到换行
+                        while let Some(c) = self.next_char() {
                             if c == '\n' {
                                 break;
                             }
                         }
                     } else if next == '*' {
                         // 块注释 /* */
-                        self.next_char();
+                        self.next_char(); // 消费 *
                         let mut prev = '\0';
                         while let Some(c) = self.next_char() {
                             if prev == '*' && c == '/' {
@@ -244,8 +245,7 @@ impl<'a> Lexer<'a> {
     }
 
     /// 读取字符串字面量
-    fn read_string(&mut self) -> Token {
-        let quote = self.next_char().unwrap();
+    fn read_string(&mut self, quote: char) -> Token {
         let mut value = String::new();
 
         while let Some(ch) = self.next_char() {
@@ -295,10 +295,7 @@ impl<'a> Lexer<'a> {
 
         // 字符串
         if ch == '"' || ch == '\'' {
-            // 回退一个字符，让 read_string 处理
-            self.position -= 1;
-            self.column -= 1;
-            return self.read_string();
+            return self.read_string(ch);
         }
 
         // 运算符和符号
@@ -384,10 +381,11 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_numbers() {
         let mut lexer = Lexer::new("42 3.14 100");
         assert_eq!(lexer.next_token(), Token::Number(42));
-        assert_eq!(lexer.next_token(), Token::Float(std::f64::consts::PI));
+        assert_eq!(lexer.next_token(), Token::Float(3.14));
         assert_eq!(lexer.next_token(), Token::Number(100));
     }
 
