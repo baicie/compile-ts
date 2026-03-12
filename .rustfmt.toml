@@ -1,18 +1,70 @@
-# Make Rust more readable given most people have wide screens nowadays.
-# This is also the setting used by [rustc](https://github.com/rust-lang/rust/blob/master/rustfmt.toml)
+# Nexa 编译器 rustfmt 配置
+# 基于 rustfmt 官方配置并针对编译器项目优化
+
+# === 基本设置 ===
+
+# 最大的行宽度
+max_width = 100
+
+# tab 宽度
+tab_spaces = 4
+
+# 换行时的缩进字符数
+indent_style = "Block"
+
+# === 格式化选项 ===
+
+# 格式化 imports
+format_strings = false
+normalize_comments = true
+wrap_comments = true
+comment_width = 80
+
+# 重新排序 import
+reorder_modules = true
+remove_nested_parens = true
+
+# 合并 use 语句
+imports_granularity = "Crate"
+
+# === 启发式设置 ===
+
+# 在大屏幕上使用更紧凑的格式
 use_small_heuristics = "Max"
 
-# Use field initialize shorthand if possible
+# 使用字段初始化简写
 use_field_init_shorthand = true
 
-reorder_modules = true
+# 格式化 match 分支
+match_block_trailing_comma = true
 
-# All unstable features that we wish for
-# unstable_features = true
+# === 实验性功能 (Rust 1.70+) ===
+
+# 2024 style edition
 # style_edition = "2024"
-# Provide a cleaner impl order
-# reorder_impl_items = true
-# Provide a cleaner import sort order
-# group_imports = "StdExternalCrate"
-# Group "use" statements by crate
-# imports_granularity = "Crate"
+
+# 重新排序 impl items
+reorder_impl_items = true
+
+# 分组导入: StdExternalCrate
+group_imports = "StdExternalCrate"
+
+# === 特定规则 ===
+
+# 格式化 let-else 语句
+format_let_else = true
+
+# 格式化控制流表达式
+control_brace_style = "AlwaysSameLine"
+
+# 函数参数换行时缩进
+fn_args_layout = "Tall"
+
+# 类型别名缩进
+type_alias_align = "Align"
+
+# 溢出时在运算符处换行
+format_overflow_style = "Default"
+
+# 规范化元组索引
+normalize_nested_quoted_strings = true

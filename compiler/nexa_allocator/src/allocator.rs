@@ -1,10 +1,12 @@
 use bumpalo::Bump;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct Allocator {
     bump: Bump,
 }
 
+#[allow(dead_code)]
 impl Allocator {
     #[expect(clippy::inline_always)]
     #[inline(always)]

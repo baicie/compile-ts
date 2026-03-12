@@ -1,0 +1,13 @@
+{
+  "private": true,
+  "scripts": {
+    "postinstall": "simple-git-hooks"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "cargo fmt -- --check && cargo clippy --all-targets -- -D warnings",
+    "pre-push": "cargo test --all"
+  },
+  "devDependencies": {
+    "simple-git-hooks": "^2.13.1"
+  }
+}

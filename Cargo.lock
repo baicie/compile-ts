@@ -18,12 +18,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "zw"
-version = "0.1.0"
-
-[[package]]
-name = "zw_allocator"
+name = "nexa_allocator"
 version = "0.1.0"
 dependencies = [
  "bumpalo",
 ]
+
+[[package]]
+name = "nexac"
+version = "0.1.0"

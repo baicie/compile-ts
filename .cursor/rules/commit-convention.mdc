@@ -1,0 +1,83 @@
+---
+description: Git 提交信息规范
+alwaysApply: true
+---
+
+# Git Commit 规范
+
+本项目使用 **Conventional Commits** 规范生成 commit 消息。
+
+## 格式
+
+```
+<type>(<scope>): <subject>
+
+[optional body]
+
+[optional footer]
+```
+
+## Type 类型
+
+| Type | 说明 |
+|------|------|
+| `feat` | 新功能 |
+| `fix` | Bug 修复 |
+| `docs` | 文档更新 |
+| `style` | 代码格式（不影响功能）|
+| `refactor` | 重构（既不是新功能也不是修复）|
+| `perf` | 性能优化 |
+| `test` | 测试相关 |
+| `chore` | 构建过程或辅助工具变动 |
+| `ci` | CI 配置更新 |
+| `revert` | 回滚之前的提交 |
+
+## 示例
+
+```bash
+# ✅ 正确
+git commit -m "feat(lexer): 添加字符串字面量解析"
+git commit -m "fix(parser): 修复数组类型解析错误"
+git commit -m "docs: 更新 README 安装说明"
+git commit -m "style: 格式化代码符合 rustfmt"
+git commit -m "refactor(allocator): 优化内存分配逻辑"
+git commit -m "perf(codegen): 减少 LLVM IR 生成时间"
+git commit -m "test: 添加词法分析器单元测试"
+git commit -m "chore: 添加 .gitignore 规则"
+git commit -m "ci: 配置 GitHub Actions"
+git commit -m "revert: 回滚 feat(parser) 提交"
+
+# ❌ 错误
+git commit -m "fixed bug"                    # 缺少 type
+git commit -m "feat: 添加新功能"             # 使用中文 subject
+git commit -m "feat: add new feature"       # subject 没有祈使句
+git commit -m "feat: Add new feature"       # subject 首字母大写
+git commit -m "feat(parser): add new parser"# subject 结尾有句号
+```
+
+## 规则
+
+1. **Subject 规则**
+   - 使用祈使句（动词原形开头）
+   - 首字母小写
+   - 结尾不加句号
+   - 不超过 50 字符
+
+2. **Body 规则**
+   - 长度不超过 72 字符
+   - 说明 "what" 和 "why"，而非 "how"
+
+3. **Footer 规则**
+   - 用于 BREAKING CHANGE 或关联 Issue
+   - 格式: `BREAKING CHANGE: description`
+   - 格式: `Closes #123`
+
+## AI 生成 Commit 时
+
+当用户要求生成 commit 时：
+
+1. 分析代码变动，确定 type
+2. 识别变动的 scope（如 lexer, parser, codegen, allocator 等）
+3. 编写简洁的 subject（不超过 50 字符）
+4. 如需要，添加 body 说明原因
+5. 使用 `git commit -m "$(cat <<'EOF'\n...\nEOF\n)"` 格式

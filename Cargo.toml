@@ -1,8 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
-    "compiler/zw",
-    "compiler/zw_allocator",
+    "compiler/nexac",
+    "compiler/nexa_allocator",
 ]
 
 [workspace.dependencies]

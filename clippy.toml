@@ -1,0 +1,16 @@
+# Nexa 编译器 Clippy 配置
+# 针对编译器项目的 clippy lint 规则
+
+# === 阈值配置 ===
+
+# 允许大参数列表（编译器中函数签名较长是正常的）
+too-many-arguments-threshold = 15
+
+# 允许大类型
+pass-by-value-size-limit = 300
+
+# 允许单个字母参数（在解析器中常见）
+single-char-binding-names-threshold = 20
+
+# cognitive complexity 阈值
+cognitive-complexity-threshold = 15

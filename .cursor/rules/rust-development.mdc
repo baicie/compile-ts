@@ -1,0 +1,179 @@
+---
+description: Nexa 编译器 Rust 开发规范
+globs: **/*.rs
+alwaysApply: false
+---
+
+# Nexa 编译器 Rust 开发规范
+
+## 项目背景
+
+本项目是 Nexa 语言编译器，采用 Rust 开发，目标是将 TypeScript 语法编译为可执行文件。项目位于 `compiler/` 目录下，包含多个子crate：nexac（主编译器）、nexa_allocator（内存分配器）等。
+
+## 代码风格
+
+### 格式化
+
+- 使用 `rustfmt` 自动格式化代码
+- 配置文件 `.rustfmt.toml` 已配置
+- **必须**在提交前运行 `cargo fmt`
+
+### 命名规范
+
+```rust
+// 模块/函数/变量: snake_case
+fn process_token() {}
+let mut buffer = Vec::new();
+
+// 结构体/枚举: PascalCase
+pub struct Lexer<'a> {
+    input: &'a str,
+}
+
+pub enum TokenKind {
+    Identifier,
+    Number,
+    // ...
+}
+
+// 常量: SCREAMING_SCREAMING_SCREAMING
+const MAX_TOKEN_LENGTH: usize = 1024;
+
+// 枚举成员: PascalCase
+TokenKind::Identifier
+```
+
+### 导入组织
+
+```rust
+// 标准库 → 外部crate → 项目内部模块
+use std::collections::HashMap;
+
+use bumpalo::Bump;
+
+mod lexer;
+mod parser;
+```
+
+## 最佳实践
+
+### 所有权与借用
+
+```rust
+// ✅ 优先使用引用而非克隆
+fn process_input(input: &str) -> Result<&str, Error> {
+    // ...
+}
+
+// ❌ 避免不必要的克隆
+// let data = other_data.clone(); // 仅在必要时使用
+```
+
+### 错误处理
+
+```rust
+// ✅ 使用 thiserror 或自定义错误类型
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Lexer error: {0}")]
+    LexerError(String),
+    
+    #[error("Parser error at line {line}: {message}")]
+    ParserError { line: usize, message: String },
+}
+
+// ✅ 使用 ? 运算符传播错误
+fn parse_file(path: &Path) -> Result<Ast, Error> {
+    let content = std::fs::read_to_string(path)?;
+    let tokens = lexer::tokenize(&content)?;
+    let ast = parser::parse(tokens)?;
+    Ok(ast)
+}
+```
+
+### 性能优化
+
+```rust
+// ✅ 使用 bumpalo 等arena分配器减少分配
+let arena = Bump::new();
+let tokens = lexer::tokenize_with_arena(&content, &arena);
+
+// ✅ 预先分配容量
+let mut buffer = Vec::with_capacity(1024);
+
+// ✅ 使用 &str 而非 String 当不需要所有权
+fn parse_keyword(input: &str) -> Option<Keyword>;
+```
+
+## 特定模块规范
+
+### 词法分析器 (lexer)
+
+- `lexer.rs`: 负责将源代码字符串转换为 token 序列
+- 命名: `tokenize`, `Lexer`, `Token`, `TokenKind`
+- 返回 `Result<Vec<Token>, Error>`
+
+### 解析器 (parser)
+
+- `parser.rs`: 将 token 序列转换为 AST
+- 使用递归下降解析
+- 每个 AST 节点实现 `Span` trait 记录源码位置
+
+### 代码生成 (codegen)
+
+- `codegen/`: 将 AST 转换为 LLVM IR
+- 使用 inkwell 绑定 LLVM
+- 遵循 inkwell 文档的命名规范
+
+### 内存分配器 (allocator)
+
+- `nexa_allocator/`: 自定义内存分配
+- 遵循 Zig 风格的显式内存管理
+- 提供 `alloc`/`dealloc` 接口
+
+## 文档要求
+
+### 公共API必须文档化
+
+```rust
+/// 将源代码字符串 token 化
+/// 
+/// # Arguments
+/// * `input` - 源代码字符串
+/// 
+/// # Errors
+/// 返回 `LexerError` 当遇到无效字符
+/// 
+/// # Example
+/// ```
+/// let tokens = tokenize("let x = 1;").unwrap();
+/// assert_eq!(tokens.len(), 5);
+/// ```
+pub fn tokenize(input: &str) -> Result<Vec<Token>, Error>;
+```
+
+### 模块级文档
+
+```rust
+//! 词法分析器模块
+//! 
+//! 负责将源代码转换为 Token 序列，支持以下词法元素：
+//! - 标识符和关键字
+//! - 数字字面量
+//! - 字符串字面量
+//! - 运算符和标点符号
+```
+
+## 开发流程
+
+1. **编写代码**: 遵循上述规范
+2. **格式化**: `cargo fmt`
+3. **检查**: `cargo clippy -- -D warnings`
+4. **测试**: `cargo test`
+5. **提交**: 确保所有检查通过
+
+## 依赖管理
+
+- 外部依赖在 `Cargo.toml` 的 `[dependencies]` 中声明
+- 开发依赖在 `[dev-dependencies]` 中声明
+- 优先使用稳定版依赖
