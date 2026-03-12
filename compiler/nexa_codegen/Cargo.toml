@@ -1,9 +1,9 @@
 [package]
-name = "nexac"
+name = "nexa_codegen"
 version = "0.1.0"
 edition = "2021"
+description = "Nexa compiler code generation (AST → LLVM IR)"
 
 [dependencies]
 inkwell = { version = "0.8.0", features = ["llvm20-1"] }
 nexa_parser = { path = "../nexa_parser" }
-nexa_codegen = { path = "../nexa_codegen" }

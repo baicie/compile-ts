@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "compiler/nexac",
     "compiler/nexa_allocator",
+    "compiler/nexa_codegen",
+    "compiler/nexa_parser",
 ]
 
 [workspace.dependencies]

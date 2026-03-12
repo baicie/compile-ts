@@ -1,14 +1,11 @@
 //! Nexa 编译器主程序
 //!
-//! 将 Nexa/TypeScript 风格的代码编译为可执行文件
+//! 读取源文件，解析为 AST，生成 LLVM IR，编译为可执行文件。
 
-use inkwell::builder::Builder;
 use inkwell::context::Context;
-use inkwell::module::Module;
-use inkwell::targets::{CodeModel, FileType, RelocMode, Target, TargetTriple};
-use inkwell::values::FunctionValue;
-use inkwell::OptimizationLevel;
-use std::path::PathBuf;
+use inkwell::targets::Target;
+use nexa_codegen::CodeGenerator;
+use nexa_parser::{Parser, Program};
 use std::process::Command;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -36,144 +33,107 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 读取源文件
     let source = std::fs::read_to_string(source_file)?;
 
-    // 编译源代码
-    compile_and_execute(&source, output_file.as_deref())?;
+    // 解析源文件
+    let mut parser = Parser::new(&source);
+    let program = match parser.parse_program() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Parse error: {} at {:?}", e.message, e.span);
+            return Err(format!("Parse error: {}", e.message).into());
+        },
+    };
+
+    println!("Parsed {} functions", program.functions.len());
+
+    // 编译并执行
+    compile_and_execute(&program, output_file.as_deref())?;
 
     Ok(())
 }
 
 /// 编译并执行代码
 fn compile_and_execute(
-    _source: &str,
+    program: &Program,
     output_file: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 初始化 LLVM 目标
     Target::initialize_native(&Default::default())?;
 
-    // 创建 LLVM 上下文
+    // 创建 LLVM 上下文和模块
     let context = Context::create();
-    let module = context.create_module("nexa");
-    let builder = context.create_builder();
+    let mut codegen = CodeGenerator::new(&context, "nexa_module");
 
-    // 声明 puts 函数
-    let puts_fn = declare_puts_function(&context, &module)?;
+    // 声明内置函数
+    codegen.declare_builtin_functions();
 
-    // 声明 main 函数
-    let main_fn = declare_main_function(&context, &module)?;
+    // 生成程序
+    codegen
+        .generate_program(program)
+        .map_err(|e| format!("Code generation error: {}", e.message))?;
 
-    // 创建 main 函数体
-    let entry = context.append_basic_block(main_fn, "entry");
-    builder.position_at_end(entry);
-
-    // 生成打印 "Hello, World!" 的代码
-    let hello_world = generate_hello_world(&context, &module, &builder)?;
-
-    // 调用 puts 打印字符串
-    builder.build_call(puts_fn, &[hello_world.into()], "puts_call")?;
-
-    // 返回 0
-    let i32_type = context.i32_type();
-    builder.build_return(Some(&i32_type.const_int(0, false)))?;
+    // 获取生成的模块
+    let module = codegen.into_module();
 
     // 验证模块
     module.verify().map_err(|e| format!("Module verification failed: {}", e))?;
 
-    // 打印生成的 IR
     println!("\nGenerated LLVM IR:");
     println!("{}", module.print_to_string().to_string_lossy());
 
     if let Some(output) = output_file {
         // 生成可执行文件
-        generate_executable(&module, output)?;
+        let triple_str = host_target_triple();
+        let target_triple = inkwell::targets::TargetTriple::create(&triple_str);
+        let target = inkwell::targets::Target::from_triple(&target_triple)?;
+
+        let target_machine = target
+            .create_target_machine(
+                &target_triple,
+                "generic",
+                "",
+                inkwell::OptimizationLevel::None,
+                inkwell::targets::RelocMode::Default,
+                inkwell::targets::CodeModel::Default,
+            )
+            .ok_or("Failed to create target machine")?;
+
+        let temp_dir = std::env::temp_dir();
+        let object_file = temp_dir.join("nexa_temp.o");
+
+        target_machine
+            .write_to_file(&module, inkwell::targets::FileType::Object, object_file.as_path())
+            .map_err(|e| format!("Failed to write object file: {}", e))?;
+
+        let link_status = Command::new("clang").arg(&object_file).arg("-o").arg(output).status()?;
+
+        let _ = std::fs::remove_file(&object_file);
+
+        if link_status.success() {
+            println!("\nCompiled to executable: {}", output);
+        } else {
+            return Err("Linker failed to produce executable".into());
+        }
     } else {
-        // 使用 JIT 执行
         println!("\nNote: Use -o <file> to generate executable file");
     }
 
     Ok(())
 }
 
-/// 生成可执行文件
-fn generate_executable(module: &Module, output: &str) -> Result<(), Box<dyn std::error::Error>> {
-    // 创建临时对象文件路径
-    let temp_dir = std::env::temp_dir();
-    let object_file = temp_dir.join("nexa_temp.o");
+/// 返回当前主机对应的 LLVM target triple 字符串
+fn host_target_triple() -> String {
+    let arch = std::env::consts::ARCH;
+    let os = std::env::consts::OS;
 
-    // 使用系统默认的 target triple (Apple Silicon)
-    let target_triple = TargetTriple::create("arm64-apple-macosx15.0.0");
-    let target = Target::from_triple(&target_triple)?;
+    let (llvm_arch, vendor, env) = match (arch, os) {
+        ("x86_64", "macos") => ("x86_64", "apple", "macosx"),
+        ("aarch64", "macos") => ("arm64", "apple", "macosx"),
+        ("x86_64", "linux") => ("x86_64", "unknown", "linux-gnu"),
+        ("aarch64", "linux") => ("aarch64", "unknown", "linux-gnu"),
+        ("x86_64", "windows") => ("x86_64", "pc", "windows-msvc"),
+        ("aarch64", "windows") => ("aarch64", "pc", "windows-msvc"),
+        _ => ("x86_64", "unknown", "unknown"),
+    };
 
-    let target_machine = target
-        .create_target_machine(
-            &target_triple,
-            "generic",
-            "",
-            OptimizationLevel::None,
-            RelocMode::Default,
-            CodeModel::Default,
-        )
-        .ok_or("Failed to create target machine")?;
-
-    // 生成对象文件
-    target_machine
-        .write_to_file(module, FileType::Object, object_file.as_path())
-        .map_err(|e| format!("Failed to write object file: {}", e))?;
-
-    // 链接生成可执行文件
-    let output_path = PathBuf::from(output);
-    let output_name = output_path.file_name().and_then(|n| n.to_str()).unwrap_or("a.out");
-
-    let link_status =
-        Command::new("clang").args([object_file.to_str().unwrap(), "-o", output_name]).status()?;
-
-    // 清理临时文件
-    let _ = std::fs::remove_file(&object_file);
-
-    if link_status.success() {
-        println!("\nCompiled to executable: {}", output_name);
-        Ok(())
-    } else {
-        Err("Linker failed to produce executable".into())
-    }
-}
-
-/// 声明 puts 函数
-fn declare_puts_function<'a>(
-    context: &'a Context,
-    module: &Module<'a>,
-) -> Result<FunctionValue<'a>, Box<dyn std::error::Error>> {
-    let i8_ptr = context.ptr_type(Default::default());
-    let fn_type = context.i32_type().fn_type(&[i8_ptr.into()], false);
-
-    let puts = module.add_function("puts", fn_type, None);
-    Ok(puts)
-}
-
-/// 声明 main 函数
-fn declare_main_function<'a>(
-    context: &'a Context,
-    module: &Module<'a>,
-) -> Result<FunctionValue<'a>, Box<dyn std::error::Error>> {
-    let fn_type = context.i32_type().fn_type(&[], false);
-    let main = module.add_function("main", fn_type, None);
-    Ok(main)
-}
-
-/// 生成 Hello World 字符串
-fn generate_hello_world<'a>(
-    context: &'a Context,
-    module: &Module<'a>,
-    builder: &Builder<'a>,
-) -> Result<inkwell::values::PointerValue<'a>, Box<dyn std::error::Error>> {
-    // 创建全局字符串常量
-    let hello_str = context.const_string(b"Hello, World!\n\0", false);
-    let global = module.add_global(hello_str.get_type(), None, "helloworld");
-    global.set_initializer(&hello_str);
-
-    // 将全局变量转换为指针
-    let i8_ptr_type = context.ptr_type(Default::default());
-    let ptr_val = builder.build_bit_cast(global, i8_ptr_type, "helloworld_ptr")?;
-    let ptr = ptr_val.into_pointer_value();
-
-    Ok(ptr)
+    format!("{llvm_arch}-{vendor}-{env}")
 }

@@ -1,0 +1,5 @@
+[package]
+name = "nexa_parser"
+version = "0.1.0"
+edition = "2021"
+description = "Nexa parser - Lexer and AST generation"
