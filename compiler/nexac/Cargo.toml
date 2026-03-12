@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-inkwell = { version = "0.8.0", features = ["llvm20-1"] }
+inkwell = { version = "0.8.0", features = ["llvm21-1"] }
 nexa_parser = { path = "../nexa_parser" }
 nexa_codegen = { path = "../nexa_codegen" }

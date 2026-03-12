@@ -5,5 +5,5 @@ edition = "2021"
 description = "Nexa compiler code generation (AST → LLVM IR)"
 
 [dependencies]
-inkwell = { version = "0.8.0", features = ["llvm20-1"] }
+inkwell = { version = "0.8.0", features = ["llvm21-1"] }
 nexa_parser = { path = "../nexa_parser" }

@@ -10,4 +10,4 @@ members = [
 [workspace.dependencies]
 
 bumpalo = "3.17.0"
-inkwell = { version = "0.8.0", features = ["llvm20-1"] }
+inkwell = { version = "0.8.0", features = ["llvm21-1"] }
