@@ -1,5 +1,5 @@
 # Nexa 编译器 rustfmt 配置
-# 基于 rustfmt 官方配置并针对编译器项目优化
+# 使用稳定版 rustfmt 功能
 
 # === 基本设置 ===
 
@@ -9,23 +9,11 @@ max_width = 100
 # tab 宽度
 tab_spaces = 4
 
-# 换行时的缩进字符数
-indent_style = "Block"
-
 # === 格式化选项 ===
-
-# 格式化 imports
-format_strings = false
-normalize_comments = true
-wrap_comments = true
-comment_width = 80
 
 # 重新排序 import
 reorder_modules = true
 remove_nested_parens = true
-
-# 合并 use 语句
-imports_granularity = "Crate"
 
 # === 启发式设置 ===
 
@@ -38,33 +26,7 @@ use_field_init_shorthand = true
 # 格式化 match 分支
 match_block_trailing_comma = true
 
-# === 实验性功能 (Rust 1.70+) ===
-
-# 2024 style edition
-# style_edition = "2024"
-
-# 重新排序 impl items
-reorder_impl_items = true
-
-# 分组导入: StdExternalCrate
-group_imports = "StdExternalCrate"
-
-# === 特定规则 ===
-
-# 格式化 let-else 语句
-format_let_else = true
-
-# 格式化控制流表达式
-control_brace_style = "AlwaysSameLine"
+# === 稳定版功能 ===
 
 # 函数参数换行时缩进
-fn_args_layout = "Tall"
-
-# 类型别名缩进
-type_alias_align = "Align"
-
-# 溢出时在运算符处换行
-format_overflow_style = "Default"
-
-# 规范化元组索引
-normalize_nested_quoted_strings = true
+fn_params_layout = "Tall"
