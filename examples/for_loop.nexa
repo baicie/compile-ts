@@ -1,0 +1,8 @@
+// 测试 for 循环
+function main(): void {
+    let sum: number = 0;
+    for (let i: number = 0; i < 5; i = i + 1) {
+        sum = sum + i;
+    }
+    console.log("sum = ");
+}

@@ -21,6 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let source_file = &args[1];
+    let debug_ast = args.iter().any(|a| a == "-d" || a == "--debug");
     let output_file = if let Some(pos) = args.iter().position(|a| a == "-o") {
         args.get(pos + 1).cloned()
     } else {
@@ -44,6 +45,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("Parsed {} functions", program.functions.len());
+
+    // 调试：打印 AST
+    if debug_ast {
+        println!("\n=== AST ===");
+        for func in &program.functions {
+            println!("Function: {}", func.name);
+            println!("  Body: {:?}", func.body);
+        }
+    }
 
     // 编译并执行
     compile_and_execute(&program, output_file.as_deref())?;

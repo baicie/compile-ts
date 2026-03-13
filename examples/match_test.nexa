@@ -1,0 +1,10 @@
+// 测试 match 表达式
+function main(): void {
+    let x: number = 2;
+    match x {
+        1 => console.log("one");
+        2 => console.log("two");
+        3 => console.log("three");
+        _ => console.log("other");
+    };
+}

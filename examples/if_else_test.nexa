@@ -1,0 +1,13 @@
+// 测试简单的 if-else
+function test_if_else(x: number): number {
+    if (x > 0) {
+        return 1;
+    } else {
+        return 2;
+    }
+}
+
+function main(): void {
+    let r: number = test_if_else(5);
+    console.log("result = ");
+}

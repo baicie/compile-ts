@@ -15,19 +15,22 @@ impl Span {
     }
 }
 
-/// 类型定义
+/// 类型定义 (TypeScript 风格)
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    I32,
-    I64,
-    F32,
-    F64,
-    Bool,
+    Number,
+    Boolean,
     String,
     Void,
+    Undefined,
+    Null,
+    Any,
+    Never,
     Array(Box<Type>),
     Pointer(Box<Type>),
     Function(Vec<Type>, Box<Type>),
+    Struct(String),
+    Object(Vec<(String, Type)>),
 }
 
 /// 表达式
@@ -82,6 +85,13 @@ pub enum Expression {
         member: String,
         span: Span,
     },
+
+    /// struct 字面量
+    StructLiteral {
+        name: String,
+        fields: Vec<(String, Expression)>,
+        span: Span,
+    },
 }
 
 /// 二元运算符
@@ -105,6 +115,7 @@ pub enum BinaryOp {
     BitXor,
     LeftShift,
     RightShift,
+    Concat,
 }
 
 /// 一元运算符
@@ -155,6 +166,15 @@ pub enum Statement {
         span: Span,
     },
 
+    /// match 表达式
+    Match {
+        /// 要匹配的值
+        value: Box<Expression>,
+        /// 分支列表
+        arms: Vec<MatchArm>,
+        span: Span,
+    },
+
     /// return 语句
     Return(Option<Expression>, Span),
 
@@ -188,9 +208,46 @@ pub struct Parameter {
     pub type_annotation: Type,
 }
 
+/// 结构体定义
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructDefinition {
+    pub name: String,
+    pub fields: Vec<StructField>,
+    pub span: Span,
+}
+
+/// 结构体字段
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub name: String,
+    pub field_type: Type,
+}
+
+/// match 分支
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    /// 匹配模式（数字或标识符）
+    pub pattern: MatchPattern,
+    /// 对应的语句
+    pub body: Box<Statement>,
+    pub span: Span,
+}
+
+/// match 模式
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchPattern {
+    /// 数字字面量
+    Number(i64),
+    /// 标识符（变量名或通配符）
+    Identifier(String),
+    /// 通配符（默认分支）
+    Wildcard,
+}
+
 /// 程序
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub functions: Vec<Function>,
+    pub structs: Vec<StructDefinition>,
     pub statements: Vec<Statement>,
 }

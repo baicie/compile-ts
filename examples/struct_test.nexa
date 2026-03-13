@@ -1,0 +1,9 @@
+// Struct test
+struct Point {
+    x: number,
+    y: number,
+}
+
+function main(): void {
+    let p: Point = Point { x: 10, y: 20 };
+}

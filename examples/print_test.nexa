@@ -1,0 +1,8 @@
+// 测试打印数字和字符串
+function main(): void {
+    console.log(123);
+    console.log("hello");
+    let x: number = 100;
+    console.log(x);
+    console.log(x + 50);
+}

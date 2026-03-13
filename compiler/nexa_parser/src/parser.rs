@@ -65,28 +65,79 @@ impl<'a> Parser<'a> {
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut functions = Vec::new();
         let mut statements = Vec::new();
+        let mut structs = Vec::new();
 
         while *self.peek() != Token::Eof {
-            if let Token::Fn = self.peek() {
-                match self.parse_function() {
+            match self.peek() {
+                Token::Function => match self.parse_function() {
                     Ok(func) => functions.push(func),
                     Err(e) => return Err(e),
-                }
-            } else {
-                match self.parse_statement() {
+                },
+                Token::Struct => match self.parse_struct_definition() {
+                    Ok(s) => structs.push(s),
+                    Err(e) => return Err(e),
+                },
+                _ => match self.parse_statement() {
                     Ok(stmt) => statements.push(stmt),
                     Err(e) => return Err(e),
-                }
+                },
             }
         }
 
-        Ok(Program { functions, statements })
+        Ok(Program { functions, structs, statements })
+    }
+
+    /// 解析结构体定义
+    fn parse_struct_definition(&mut self) -> Result<StructDefinition, ParseError> {
+        let start = self.position();
+        self.expect_token(&Token::Struct)?;
+
+        let name = match self.peek() {
+            Token::Identifier(name) => name.clone(),
+            _ => {
+                return Err(ParseError {
+                    message: "Expected struct name".to_string(),
+                    span: self.span(start),
+                })
+            },
+        };
+        self.advance();
+
+        self.expect_token(&Token::LeftBrace)?;
+
+        let mut fields = Vec::new();
+        while *self.peek() != Token::RightBrace {
+            let field_name = match self.peek() {
+                Token::Identifier(name) => name.clone(),
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected field name".to_string(),
+                        span: self.span(self.position()),
+                    })
+                },
+            };
+            self.advance();
+
+            self.expect_token(&Token::Colon)?;
+            let field_type = self.parse_type()?;
+
+            fields.push(StructField { name: field_name, field_type });
+
+            // 处理逗号分隔
+            if *self.peek() == Token::Comma {
+                self.advance();
+            }
+        }
+
+        self.expect_token(&Token::RightBrace)?;
+
+        Ok(StructDefinition { name, fields, span: self.span(start) })
     }
 
     /// 解析函数
     fn parse_function(&mut self) -> Result<Function, ParseError> {
         let start = self.position();
-        self.advance(); // 跳过 fn
+        self.advance(); // 跳过 function
 
         let name = match self.peek() {
             Token::Identifier(name) => name.clone(),
@@ -125,7 +176,7 @@ impl<'a> Parser<'a> {
         }
         self.advance(); // 跳过 )
 
-        // 返回类型
+        // 返回类型 (TypeScript 风格: : number)
         let return_type = if *self.peek() == Token::Colon {
             self.advance();
             self.parse_type()?
@@ -139,20 +190,31 @@ impl<'a> Parser<'a> {
         Ok(Function { name, parameters, return_type, body, span: self.span(start) })
     }
 
-    /// 解析类型
+    /// 解析类型 (TypeScript 风格)
     fn parse_type(&mut self) -> Result<Type, ParseError> {
         let start = self.position();
         let ty = match self.peek() {
-            Token::I32 => Type::I32,
-            Token::I64 => Type::I64,
-            Token::F32 => Type::F32,
-            Token::F64 => Type::F64,
-            Token::Bool => Type::Bool,
-            Token::String => Type::String,
+            Token::NumberType => Type::Number,
+            Token::BooleanType => Type::Boolean,
+            Token::StringType => Type::String,
             Token::Void => Type::Void,
-            Token::Identifier(_name) => {
-                // 简单处理：自定义类型名
-                return Ok(Type::Pointer(Box::new(Type::I32))); // TODO: 自定义类型
+            Token::Undefined => Type::Undefined,
+            Token::Null => Type::Null,
+            Token::Any => Type::Any,
+            Token::Identifier(_) => {
+                // 自定义类型名（struct 名称）
+                // 先获取名称，再 advance
+                let type_name = match self.peek() {
+                    Token::Identifier(name) => name.clone(),
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected type name".to_string(),
+                            span: self.span(start),
+                        })
+                    },
+                };
+                self.advance();
+                return Ok(Type::Struct(type_name));
             },
             Token::LeftBracket => {
                 // 数组类型 T[]
@@ -160,6 +222,12 @@ impl<'a> Parser<'a> {
                 self.expect_token(&Token::RightBracket)?;
                 let element_type = self.parse_type()?;
                 Type::Array(Box::new(element_type))
+            },
+            Token::Star => {
+                // 指针类型 *T
+                self.advance();
+                let pointee_type = self.parse_type()?;
+                Type::Pointer(Box::new(pointee_type))
             },
             _ => {
                 return Err(ParseError {
@@ -179,6 +247,7 @@ impl<'a> Parser<'a> {
             Token::If => self.parse_if_statement(),
             Token::While => self.parse_while_statement(),
             Token::For => self.parse_for_statement(),
+            Token::Match => self.parse_match_statement(),
             Token::Return => self.parse_return_statement(),
             Token::Break => {
                 let start = self.position();
@@ -331,6 +400,76 @@ impl<'a> Parser<'a> {
         let body = Box::new(self.parse_statement()?);
 
         Ok(Statement::For { initializer, condition, update, body, span: self.span(start) })
+    }
+
+    /// 解析 match 语句
+    fn parse_match_statement(&mut self) -> Result<Statement, ParseError> {
+        let start = self.position();
+        self.advance(); // 跳过 match
+
+        let value = Box::new(self.parse_expression()?);
+
+        self.expect_token(&Token::LeftBrace)?;
+
+        let mut arms = Vec::new();
+        while *self.peek() != Token::RightBrace {
+            arms.push(self.parse_match_arm()?);
+        }
+
+        self.expect_token(&Token::RightBrace)?;
+
+        Ok(Statement::Match { value, arms, span: self.span(start) })
+    }
+
+    /// 解析 match 分支
+    fn parse_match_arm(&mut self) -> Result<MatchArm, ParseError> {
+        let start = self.position();
+
+        // 解析模式
+        let pattern = match self.peek() {
+            Token::Number(n) => {
+                let num = *n;
+                self.advance();
+                MatchPattern::Number(num)
+            },
+            Token::Identifier(name) => {
+                let name_clone = name.clone();
+                self.advance();
+                // 检查是否是通配符 _
+                if name_clone == "_" {
+                    MatchPattern::Wildcard
+                } else {
+                    MatchPattern::Identifier(name_clone)
+                }
+            },
+            _ => {
+                return Err(ParseError {
+                    message: format!("Expected pattern, got {:?}", self.peek()),
+                    span: self.span(start),
+                });
+            },
+        };
+
+        // 跳过 =>
+        self.expect_token(&Token::EqualsGreaterThan)?;
+
+        // 解析分支体 - 允许没有分号的简单表达式
+        // 如果是分号则跳过
+        if *self.peek() == Token::SemiColon {
+            self.advance();
+        }
+
+        // 解析表达式作为分支体
+        let expr = self.parse_expression()?;
+
+        // 如果后面有分号则跳过
+        if *self.peek() == Token::SemiColon {
+            self.advance();
+        }
+
+        let body = Box::new(Statement::ExpressionStatement(expr));
+
+        Ok(MatchArm { pattern, body, span: self.span(start) })
     }
 
     /// 解析 return 语句
@@ -540,10 +679,11 @@ impl<'a> Parser<'a> {
         let start = self.position();
         let mut left = self.parse_multiplication()?;
 
-        while let Token::Plus | Token::Minus = self.peek().clone() {
+        while let Token::Plus | Token::Minus | Token::PlusPlus = self.peek().clone() {
             let op = match self.peek() {
                 Token::Plus => BinaryOp::Add,
                 Token::Minus => BinaryOp::Subtract,
+                Token::PlusPlus => BinaryOp::Concat,
                 _ => unreachable!(),
             };
             self.advance();
@@ -680,6 +820,41 @@ impl<'a> Parser<'a> {
                         span: self.span(start),
                     };
                 },
+                Token::LeftBrace => {
+                    // 可能是 struct 字面量 { field: value, ... }
+                    // 需要回退并重新解析
+                    if let Expression::Identifier(type_name, _) = &expr {
+                        // 检查是否是 struct 字面量
+                        self.advance(); // 跳过 {
+                        let mut fields = Vec::new();
+                        while *self.peek() != Token::RightBrace {
+                            let field_name = match self.peek() {
+                                Token::Identifier(name) => name.clone(),
+                                _ => {
+                                    return Err(ParseError {
+                                        message: "Expected field name".to_string(),
+                                        span: self.span(self.position()),
+                                    })
+                                },
+                            };
+                            self.advance();
+                            self.expect_token(&Token::Colon)?;
+                            let field_value = self.parse_expression()?;
+                            fields.push((field_name, field_value));
+                            if *self.peek() == Token::Comma {
+                                self.advance();
+                            }
+                        }
+                        self.expect_token(&Token::RightBrace)?;
+                        expr = Expression::StructLiteral {
+                            name: type_name.clone(),
+                            fields,
+                            span: self.span(start),
+                        };
+                    } else {
+                        break;
+                    }
+                },
                 _ => break,
             }
         }
@@ -732,7 +907,7 @@ mod tests {
 
     #[test]
     fn test_parse_function() {
-        let source = "fn add(a: i32, b: i32): i32 { return a + b; }";
+        let source = "function add(a: number, b: number): number { return a + b; }";
         let mut parser = Parser::new(source);
         let result = parser.parse_program();
         assert!(result.is_ok(), "Error: {:?}", result.err());

@@ -1,0 +1,10 @@
+// 测试直接赋值
+function get_value(): number {
+    return 42;
+}
+
+function main(): void {
+    let x: number = 0;
+    x = get_value();
+    console.log("x = ");
+}

@@ -1,0 +1,12 @@
+// 测试 break - 找到第一个能被 5 整除的数
+function main(): void {
+    let i: number = 1;
+    while (i <= 20) {
+        if (i % 5 == 0) {
+            console.log("found: ");
+            console.log(i);
+            break;
+        }
+        i = i + 1;
+    }
+}

@@ -1,0 +1,4 @@
+// 简单测试
+function main(): void {
+    let x: number = 2;
+}

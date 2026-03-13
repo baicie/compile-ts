@@ -1,0 +1,7 @@
+// 测试 match 各种情况
+function main(): void {
+    let a: number = 1;
+    match a {
+        1 => console.log("one")
+    }
+}

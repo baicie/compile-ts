@@ -1,0 +1,14 @@
+// 测试有 else 分支的 if
+function fib(n: number): number {
+    if (n <= 1) {
+        return n;
+    } else {
+        return fib(n - 1) + fib(n - 2);
+    }
+}
+
+function main(): void {
+    let result: number = fib(10);
+    console.log("fib(10) = ");
+    console.log(result);
+}

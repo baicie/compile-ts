@@ -1,0 +1,9 @@
+// 测试函数调用赋值
+function get_value(): number {
+    return 42;
+}
+
+function main(): void {
+    let x: number = get_value();
+    console.log("x = ");
+}

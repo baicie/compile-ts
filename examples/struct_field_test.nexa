@@ -1,0 +1,11 @@
+// Struct field access test
+struct Point {
+    x: number,
+    y: number,
+}
+
+function main(): void {
+    let p = Point { x: 10, y: 20 };
+    console.log(p.x);
+    console.log(p.y);
+}

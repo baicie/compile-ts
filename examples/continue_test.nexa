@@ -1,0 +1,12 @@
+// 测试 continue - 打印 1-10 的奇数
+function main(): void {
+    let i: number = 0;
+    while (i < 10) {
+        i = i + 1;
+        if (i % 2 == 0) {
+            continue;
+        }
+        console.log(i);
+    }
+    console.log("done");
+}

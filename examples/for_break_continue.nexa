@@ -1,0 +1,24 @@
+// 测试 for 循环中的 break 和 continue
+function main(): void {
+    let sum: number = 0;
+    // 累加 1-100，遇到 50 停止
+    for (let i: number = 1; i <= 100; i = i + 1) {
+        if (i == 50) {
+            break;
+        }
+        sum = sum + i;
+    }
+    console.log("sum 1-49 = ");
+    console.log(sum);
+
+    // 累加 1-100，跳过 5 的倍数
+    let sum2: number = 0;
+    for (let j: number = 1; j <= 10; j = j + 1) {
+        if (j % 5 == 0) {
+            continue;
+        }
+        sum2 = sum2 + j;
+    }
+    console.log("sum 1-10 skip 5,10 = ");
+    console.log(sum2);
+}
