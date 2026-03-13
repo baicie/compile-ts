@@ -200,7 +200,7 @@ impl<'ctx> TypeMapper<'ctx> {
 | `undefined`      | `i8*` (null) |          |
 | `any`            | `i8*`        | 指针     |
 | `T[]`            | `T*`         | 数组指针 |
-| `struct`         | `{ ... }`    | 结构体   |
+| `interface`      | `{ ... }`    | 结构体   |
 
 #### 1.1.4 LLVM 优化配置
 
@@ -226,8 +226,8 @@ impl<'ctx> TypeMapper<'ctx> {
 
 ```ts
 // hello.ts
-fn main() {
-    println("Hello, World!");
+function main() {
+  println("Hello, World!");
 }
 ```
 
@@ -266,26 +266,26 @@ fn main() {
 | P0     | return         | 返回值   |
 | P1     | for            | 计数循环 |
 | P1     | break/continue | 循环控制 |
-| P2     | match          | 模式匹配 |
+| P2     | switch/case    | 模式匹配 |
 
 #### 2.3 函数生成
 
-| 优先级 | 特性     | 说明                          |
-| ------ | -------- | ----------------------------- |
-| P0     | 函数定义 | fn add(a: i32, b: i32) -> i32 |
-| P0     | 参数传递 | 按值传递                      |
-| P0     | 返回值   | 处理 void 和非 void           |
-| P1     | 局部变量 | 栈分配                        |
-| P2     | 闭包     | 高优先级延后                  |
+| 优先级 | 特性     | 说明                              |
+| ------ | -------- | --------------------------------- |
+| P0     | 函数定义 | function add(a: i32, b: i32): i32 |
+| P0     | 参数传递 | 按值传递                          |
+| P0     | 返回值   | 处理 void 和非 void               |
+| P1     | 局部变量 | 栈分配                            |
+| P2     | 闭包     | 高优先级延后                      |
 
 #### 2.4 结构体生成
 
-| 优先级 | 特性        | 说明          |
-| ------ | ----------- | ------------- |
-| P0     | struct 定义 | 内存布局      |
-| P0     | 字段访问    | a.x           |
-| P1     | 方法调用    | obj.method()  |
-| P2     | 继承        | class extends |
+| 优先级 | 特性           | 说明         |
+| ------ | -------------- | ------------ |
+| P0     | interface 定义 | 内存布局     |
+| P0     | 字段访问       | a.x          |
+| P1     | 方法调用       | obj.method() |
+| P2     | 继承           | extends      |
 
 #### 2.5 里程碑 M2-M3
 
@@ -328,17 +328,17 @@ M3: 控制流和循环 (第 6 个月)
 
 ```nexa
 // 基础 IO
-fn println(s: string): void
-fn print(s: string): void
-fn readln(): string
+function println(s: string): void
+function print(s: string): void
+function readln(): string
 
 // 内存管理
-fn malloc(size: usize): *u8
-fn free(ptr: *u8): void
+function malloc(size: usize): *u8
+function free(ptr: *u8): void
 
 // 基础系统
-fn exit(code: i32): void
-fn sleep(ms: u32): void
+function exit(code: i32): void
+function sleep(ms: u32): void
 ```
 
 #### 3.4 里程碑 M4: 生成可执行文件 (第 9 个月)
@@ -435,7 +435,7 @@ Nexa0 语言规范:
 │   ├── 函数定义和调用
 │   └── 递归
 ├── 结构体
-│   ├── struct 定义
+│   ├── interface 定义
 │   └── 字段访问
 └── 内存
     ├── 栈分配
@@ -482,7 +482,7 @@ M6: 初步自举 (第 12 个月)
 
 ```nexa
 // 字符串内部表示 (UTF-8)
-struct String {
+interface String {
     ptr: *u8,    // 指向堆内存
     len: usize,  // 字节长度
     cap: usize,  // 容量
@@ -493,7 +493,7 @@ struct String {
 
 ```nexa
 // 动态数组表示
-struct Array<T> {
+interface Array<T> {
     ptr: *T,     // 指向堆内存
     len: usize,  // 元素数量
     cap: usize,  // 容量
@@ -504,7 +504,7 @@ struct Array<T> {
 
 ```nexa
 // 闭包捕获上下文
-struct Closure<T> {
+interface Closure<T> {
     fn_ptr: *const (),     // 函数指针
     ctx: *const CapturedContext,  // 捕获的上下文
 }
@@ -514,7 +514,7 @@ struct Closure<T> {
 
 ```nexa
 // 运行时初始化入口
-fn __runtime_init() {
+function __runtime_init(): void {
     // 初始化堆分配器
     allocator_init();
 
@@ -532,24 +532,24 @@ fn __runtime_init() {
 
 ```nexa
 // 显式内存分配 - 类似 Zig
-fn create_buffer(size: usize): *u8 {
-    const buf = malloc(size);  // 显式分配
+function create_buffer(size: usize): *u8 {
+    let buf = malloc(size);  // 显式分配
     // 使用 buf...
     return buf;
 }
 
 // defer 关键词 - 作用域结束时自动释放
-fn read_file(path: string): []u8 {
-    const fd = open(path);
+function read_file(path: string): []u8 {
+    let fd = open(path);
     defer close(fd);  // 函数结束自动调用 close(fd)
 
-    const data = read(fd);
+    let data = read(fd);
     return data;  // close(fd) 会在 return 之前自动执行
 }
 
 // 资源清理示例
-fn process_request(req: Request): Response {
-    const conn = connect(req.server);
+function process_request(req: Request): Response {
+    let conn = connect(req.server);
     defer disconnect(conn);  // 确保连接被关闭
 
     if (req.timeout > 0) {
@@ -560,8 +560,8 @@ fn process_request(req: Request): Response {
 }
 
 // 错误处理结合 defer
-fn write_log(path: string, data: []u8) !void {
-    const file = try open_file(path);
+function write_log(path: string, data: []u8) !void {
+    let file = try open_file(path);
     defer close(file);  // 即使出错也会关闭文件
 
     try write(file, data);
@@ -581,7 +581,7 @@ fn write_log(path: string, data: []u8) !void {
 
 ```nexa
 // 异步函数
-async fn fetch(url: string): Response {
+async function fetch(url: string): Response {
     let resp = await http_get(url);
     resp
 }
@@ -599,11 +599,11 @@ spawn {
 ```nexa
 // 导入 C 函数
 extern "C" {
-    fn printf(format: *const i8, ...) -> i32;
+    function printf(format: *const i8, ...) -> i32;
 }
 
 // 导出给 C
-export fn my_function() {
+export function my_function(): void {
     // ...
 }
 ```
@@ -799,8 +799,8 @@ Language Server Protocol 实现 IDE 集成：
 $ nexac repl
 Nexa> let x = 1 + 2
 3
-Nexa> fn add(a: i32, b: i32) -> i32 { a + b }
-fn add(a: i32, b: i32) -> i32
+Nexa> function add(a: i32, b: i32): i32 { a + b }
+function add(a: i32, b: i32): i32
 Nexa> add(1, 2)
 3
 ```
@@ -810,7 +810,7 @@ Nexa> add(1, 2)
 类似 Zig 的内联汇编支持：
 
 ```nexa
-fn syscall() -> i64 {
+function syscall(): i64 {
     asm volatile(
         "movq $$60, %rax",
         "movq $$42, %rdi",
@@ -893,7 +893,7 @@ nexa-analyze:
 - [x] while 循环
 - [x] for 循环
 - [x] break/continue 循环控制
-- [x] match 模式匹配
+- [x] switch/case 模式匹配
 
 #### 函数生成
 
@@ -902,12 +902,6 @@ nexa-analyze:
 - [x] 返回值处理
 - [x] 局部变量
 - [ ] 闭包支持
-
-#### 结构体生成
-
-- [ ] struct 定义
-- [ ] 字段访问
-- [ ] 方法调用
 
 ### 阶段三：编译输出 (M4)
 
@@ -919,7 +913,7 @@ nexa-analyze:
 
 #### 结构体生成
 
-- [ ] struct 定义
+- [ ] interface 定义
 - [ ] 字段访问
 - [ ] 方法调用
 

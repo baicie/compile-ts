@@ -1,0 +1,9 @@
+function main(): i32 {
+    let result: i32 = 0;
+
+    switch 1 {
+        case 1 => result = 100;
+    }
+
+    return result;
+}

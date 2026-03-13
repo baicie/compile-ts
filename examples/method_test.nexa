@@ -1,0 +1,13 @@
+// 测试方法调用
+struct Calculator {
+    value: i32,
+}
+
+function getValue(c: Calculator): i32 {
+    return c.value;
+}
+
+function main(): i32 {
+    let calc: Calculator = Calculator { value: 10 };
+    return getValue(calc);
+}

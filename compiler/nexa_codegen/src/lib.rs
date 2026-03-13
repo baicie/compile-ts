@@ -30,10 +30,10 @@ pub struct CodeGenerator<'ctx> {
     builder: Builder<'ctx>,
     /// 当前函数
     current_function: Option<FunctionValue<'ctx>>,
-    /// 局部变量映射
+    /// 局部变量映射 (变量名 -> 指针值)
     variables: HashMap<String, PointerValue<'ctx>>,
-    /// 变量类型映射 (变量名 -> struct 类型名)
-    variable_types: HashMap<String, String>,
+    /// 变量类型映射 (变量名 -> LLVM 类型)
+    variable_types: HashMap<String, inkwell::types::BasicTypeEnum<'ctx>>,
     /// 类型映射器
     #[allow(dead_code)]
     type_mapper: TypeMapper<'ctx>,
@@ -64,6 +64,26 @@ impl<'ctx> CodeGenerator<'ctx> {
         self.context
     }
 
+    /// 将任意 BasicValue 转换为 i32
+    fn coerce_to_i32(
+        &mut self,
+        value: inkwell::values::BasicValueEnum<'ctx>,
+    ) -> Result<inkwell::values::IntValue<'ctx>, CodegenError> {
+        let i32_type = self.context.i32_type();
+        match value {
+            inkwell::values::BasicValueEnum::IntValue(v) => {
+                Ok(v)
+            },
+            inkwell::values::BasicValueEnum::PointerValue(p) => {
+                // 指针转换为 int
+                Ok(self.builder().build_ptr_to_int(p, i32_type, "ptr_to_i32")?)
+            },
+            _ => Err(CodegenError {
+                message: format!("Cannot coerce type to i32"),
+            }),
+        }
+    }
+
     /// 获取模块
     pub fn module(&self) -> &Module<'ctx> {
         &self.module
@@ -91,13 +111,13 @@ impl<'ctx> CodeGenerator<'ctx> {
     }
 
     /// 设置变量类型
-    pub fn set_variable_type(&mut self, name: &str, type_name: &str) {
-        self.variable_types.insert(name.to_string(), type_name.to_string());
+    pub fn set_variable_type(&mut self, name: &str, ty: inkwell::types::BasicTypeEnum<'ctx>) {
+        self.variable_types.insert(name.to_string(), ty);
     }
 
     /// 获取变量类型
-    pub fn get_variable_type(&self, name: &str) -> Option<&String> {
-        self.variable_types.get(name)
+    pub fn get_variable_type(&self, name: &str) -> Option<inkwell::types::BasicTypeEnum<'ctx>> {
+        self.variable_types.get(name).copied()
     }
 
     /// 设置当前函数
@@ -113,14 +133,23 @@ impl<'ctx> CodeGenerator<'ctx> {
     /// 声明内置函数 (puts, console.log 等)
     pub fn declare_builtin_functions(&mut self) {
         let i8_ptr = self.context.ptr_type(AddressSpace::default());
+        let i32_type = self.context.i32_type();
 
         // puts - C 标准库输出字符串
-        let puts_type = self.context.i32_type().fn_type(&[i8_ptr.into()], false);
+        let puts_type = i32_type.fn_type(&[i8_ptr.into()], false);
         self.module.add_function("puts", puts_type, None);
 
         // console.log (通过 puts 实现)
-        let console_log_type = self.context.i32_type().fn_type(&[i8_ptr.into()], false);
+        let console_log_type = i32_type.fn_type(&[i8_ptr.into()], false);
         self.module.add_function("console.log", console_log_type, None);
+
+        // scanf - C 标准库读取输入
+        let scanf_type = i32_type.fn_type(&[i8_ptr.into()], true);
+        self.module.add_function("scanf", scanf_type, None);
+
+        // readln_i32 - 读取整数
+        let readln_i32_type = i32_type.fn_type(&[], false);
+        self.module.add_function("readln_i32", readln_i32_type, None);
     }
 }
 
@@ -139,6 +168,11 @@ impl From<inkwell::builder::BuilderError> for CodegenError {
 impl<'ctx> CodeGenerator<'ctx> {
     /// 生成程序
     pub fn generate_program(&mut self, program: &Program) -> Result<(), CodegenError> {
+        // 生成 struct 定义
+        for struct_def in &program.structs {
+            self.generate_struct_definition(struct_def)?;
+        }
+
         // 生成函数声明
         for func in &program.functions {
             self.generate_function_declaration(func)?;
@@ -149,6 +183,24 @@ impl<'ctx> CodeGenerator<'ctx> {
             self.generate_function(func)?;
         }
 
+        Ok(())
+    }
+
+    /// 生成 struct 定义
+    fn generate_struct_definition(
+        &mut self,
+        struct_def: &StructDefinition,
+    ) -> Result<(), CodegenError> {
+        let field_types: Vec<inkwell::types::BasicTypeEnum> = struct_def
+            .fields
+            .iter()
+            .map(|field| self.map_type(&field.field_type))
+            .collect();
+
+        let struct_type = self.context.opaque_struct_type(&struct_def.name);
+        struct_type.set_body(&field_types, false);
+
+        self.struct_types.insert(struct_def.name.clone(), struct_type);
         Ok(())
     }
 
@@ -189,6 +241,8 @@ impl<'ctx> CodeGenerator<'ctx> {
             let basic_value = param_value;
             self.builder().build_store(alloca, basic_value)?;
             self.add_variable(param.name.clone(), alloca);
+            // 保存参数类型
+            self.set_variable_type(&param.name, param_value.get_type());
         }
 
         // 生成函数体
@@ -260,8 +314,8 @@ impl<'ctx> CodeGenerator<'ctx> {
                     }
 
                     self.add_variable(name.clone(), alloca);
-                    // 设置变量类型
-                    self.set_variable_type(name, &struct_name);
+                    // 保存结构体类型信息
+                    self.set_variable_type(name, struct_type.into());
                 } else {
                     // 确定类型
                     let ty = type_annotation
@@ -281,10 +335,8 @@ impl<'ctx> CodeGenerator<'ctx> {
                     }
 
                     self.add_variable(name.clone(), alloca);
-                    // 如果有类型注解，也保存类型信息
-                    if let Some(Type::Struct(struct_name)) = type_annotation {
-                        self.set_variable_type(name, struct_name);
-                    }
+                    // 保存类型信息
+                    self.set_variable_type(name, ty);
                 }
             },
             Statement::Assignment { target, value, span: _ } => {
@@ -490,8 +542,8 @@ impl<'ctx> CodeGenerator<'ctx> {
                 // 结束块
                 self.builder().position_at_end(end_block);
             },
-            Statement::Match { value, arms, span: _ } => {
-                self.generate_match(value.as_ref(), arms)?;
+            Statement::Switch { value, arms, span: _ } => {
+                self.generate_switch(value.as_ref(), arms)?;
             },
         }
 
@@ -528,10 +580,16 @@ impl<'ctx> CodeGenerator<'ctx> {
             },
             Expression::Identifier(name, _span) => {
                 if let Some(ptr) = self.get_variable(name) {
-                    // 简化处理：假设变量是 i32 类型
-                    let i32_type = self.context.i32_type();
-                    let value = self.builder().build_load(i32_type, ptr, name)?;
-                    Ok(value)
+                    // 根据保存的类型信息加载变量
+                    if let Some(var_type) = self.get_variable_type(name) {
+                        let value = self.builder().build_load(var_type, ptr, name)?;
+                        Ok(value)
+                    } else {
+                        // 默认使用 i32 类型（兼容旧代码）
+                        let i32_type = self.context.i32_type();
+                        let value = self.builder().build_load(i32_type, ptr, name)?;
+                        Ok(value)
+                    }
                 } else {
                     Err(CodegenError { message: format!("Variable {} not found", name) })
                 }
@@ -868,6 +926,31 @@ impl<'ctx> CodeGenerator<'ctx> {
                     return Ok(self.context.i32_type().const_int(0, false).into());
                 }
 
+                // 处理 readln 函数
+                if callee_name == "readln" || callee_name == "readln_i32" {
+                    let i32_type = self.context.i32_type();
+                    let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+
+                    // 分配一个 i32 变量来存储输入
+                    let input_var = self.builder().build_alloca(i32_type, "input_var")?;
+
+                    // 创建格式字符串 "%d"
+                    let format_str = self.context.const_string(b"%d\0", true);
+                    let format_global = self.module.add_global(format_str.get_type(), None, "readln_format");
+                    format_global.set_initializer(&format_str);
+                    let format_ptr = self.builder().build_bit_cast(format_global, i8_ptr_type, "format_ptr")?;
+
+                    // 调用 scanf
+                    let scanf_fn = self.module.get_function("scanf").ok_or_else(|| CodegenError {
+                        message: "scanf function not found".to_string(),
+                    })?;
+                    self.builder().build_call(scanf_fn, &[format_ptr.into(), input_var.into()], "scanf_call")?;
+
+                    // 加载输入的值
+                    let result = self.builder().build_load(i32_type, input_var, "readln_result")?;
+                    return Ok(result.into());
+                }
+
                 let fn_value = self.module.get_function(&callee_name).ok_or_else(|| {
                     CodegenError { message: format!("Function {} not found", callee_name) }
                 })?;
@@ -878,13 +961,50 @@ impl<'ctx> CodeGenerator<'ctx> {
                     args_values.push(arg_val.into());
                 }
 
-                self.builder().build_call(fn_value, &args_values, "call")?;
+                let call_result = self.builder().build_call(fn_value, &args_values, "call")?;
 
+                // 获取函数返回类型
+                let fn_return_type = fn_value.get_type().get_return_type();
                 let i32_type = self.context.i32_type();
+                if let Some(_return_type) = fn_return_type {
+                    // 如果有返回值，尝试获取返回值
+                    let value_kind = call_result.try_as_basic_value();
+                    match value_kind {
+                        inkwell::values::ValueKind::Basic(basic_value) => {
+                            return Ok(basic_value);
+                        },
+                        _ => {},
+                    }
+                }
+                // 默认返回 0
                 Ok(i32_type.const_int(0, false).into())
             },
-            Expression::Index { array: _, index: _, span: _ } => {
-                Err(CodegenError { message: "Array index not implemented".to_string() })
+            Expression::Index { array, index, span: _ } => {
+                // 生成数组和索引值
+                let array_value = self.generate_expression(array)?;
+                let index_value = self.generate_expression(index)?;
+
+                // 获取数组的指针值
+                let array_ptr = array_value.into_pointer_value();
+
+                // 将索引转换为 i32
+                let index_i32 = self.coerce_to_i32(index_value)?;
+
+                // 使用 GEP 获取元素指针（假设数组元素是 i32）
+                let i32_type = self.context.i32_type();
+                let zero = i32_type.const_int(0, false);
+                let element_ptr = unsafe {
+                    self.builder().build_in_bounds_gep(
+                        i32_type,
+                        array_ptr,
+                        &[zero, index_i32],
+                        "array_element_ptr",
+                    )
+                }?;
+
+                // 加载元素值
+                let element = self.builder().build_load(i32_type, element_ptr, "array_element")?;
+                Ok(element)
             },
             Expression::StructLiteral { name, fields, span: _ } => {
                 // 获取或创建 struct 类型
@@ -917,31 +1037,40 @@ impl<'ctx> CodeGenerator<'ctx> {
                 if let Expression::Identifier(var_name, _) = object.as_ref() {
                     // 如果是标识符，获取变量的指针
                     if let Some(ptr) = self.get_variable(var_name) {
-                        // 尝试从变量类型映射中获取 struct 类型
-                        let field_index = if member == "x" {
-                            0
-                        } else if member == "y" {
-                            1
-                        } else if member == "z" {
-                            2
-                        } else {
-                            0
-                        };
+                        // 获取变量类型
+                        let var_type_opt = self.get_variable_type(var_name);
 
                         // 预先创建索引常量
                         let i32_type = self.context.i32_type();
                         let zero = i32_type.const_int(0, false);
+
+                        // 根据变量类型确定字段索引和类型
+                        let field_index = match member.as_str() {
+                            "x" => 0,
+                            "y" => 1,
+                            "z" => 2,
+                            _ => 0,
+                        };
                         let idx = i32_type.const_int(field_index as u64, false);
 
-                        // 尝试获取 struct 类型
-                        let struct_type_opt =
-                            if let Some(struct_name) = self.get_variable_type(var_name) {
-                                self.struct_types.get(struct_name).copied()
+                        // 尝试获取 struct 类型（目前未使用，保留用于未来实现）
+                        let _struct_type_opt: Option<inkwell::types::StructType<'ctx>> = if let Some(var_type) = var_type_opt {
+                            // 如果变量类型存储的是 struct 指针
+                            if var_type.is_pointer_type() {
+                                None
+                            } else if var_type.is_struct_type() {
+                                None
                             } else {
                                 None
-                            };
+                            }
+                        } else {
+                            None
+                        };
 
-                        if let Some(struct_type) = struct_type_opt {
+                        // 查找 struct 类型
+                        let struct_type = self.find_struct_type_from_variable(var_name);
+
+                        if let Some(struct_type) = struct_type {
                             // 使用 struct 类型进行 GEP 获取字段地址
                             let field_ptr = unsafe {
                                 self.builder().build_in_bounds_gep(
@@ -952,9 +1081,14 @@ impl<'ctx> CodeGenerator<'ctx> {
                                 )?
                             };
 
-                            // 加载字段值
-                            let field_value =
-                                self.builder().build_load(struct_type, field_ptr, member)?;
+                            // 获取字段的实际类型并加载
+                            let field_types = struct_type.get_field_types();
+                            let field_llvm_type = field_types[field_index];
+                            let field_value = self.builder().build_load(
+                                field_llvm_type,
+                                field_ptr,
+                                member,
+                            )?;
                             return Ok(field_value);
                         }
 
@@ -1047,6 +1181,12 @@ impl<'ctx> CodeGenerator<'ctx> {
                 }
                 Ok(value)
             },
+            Expression::FunctionExpression { .. } => {
+                // 函数表达式暂不支持作为表达式值
+                Err(CodegenError {
+                    message: "Function expressions are not supported as values".to_string(),
+                })
+            },
         }
     }
 
@@ -1077,6 +1217,27 @@ impl<'ctx> CodeGenerator<'ctx> {
         Ok(struct_type)
     }
 
+    /// 从变量查找 struct 类型
+    /// 遍历所有 struct 类型，找到变量对应的 struct 类型
+    fn find_struct_type_from_variable(
+        &self,
+        var_name: &str,
+    ) -> Option<inkwell::types::StructType<'ctx>> {
+        // 检查变量类型映射
+        if let Some(var_type) = self.variable_types.get(var_name) {
+            if var_type.is_struct_type() {
+                let struct_type = var_type.into_struct_type();
+                // 尝试在 struct_types 中查找匹配的类型
+                for (_name, st) in &self.struct_types {
+                    if *st == struct_type {
+                        return Some(*st);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     /// 将 Nexa 类型映射到 LLVM 类型 (TypeScript 风格)
     fn map_type(&self, ty: &Type) -> BasicTypeEnum<'ctx> {
         match ty {
@@ -1095,50 +1256,58 @@ impl<'ctx> CodeGenerator<'ctx> {
             Type::Array(_) => self.context.ptr_type(AddressSpace::default()).into(),
             Type::Pointer(_) => self.context.ptr_type(AddressSpace::default()).into(),
             Type::Function(_, return_type) => self.map_type(return_type),
-            Type::Struct(_) => self.context.ptr_type(AddressSpace::default()).into(),
+            Type::Struct(name) => {
+                // 尝试查找已注册的 struct 类型
+                if let Some(struct_type) = self.struct_types.get(name) {
+                    (*struct_type).into()
+                } else {
+                    // 如果未找到，返回指针类型作为后备
+                    self.context.ptr_type(AddressSpace::default()).into()
+                }
+            },
             Type::Object(_) => self.context.ptr_type(AddressSpace::default()).into(),
         }
     }
 
-    /// 生成 match 表达式
+    /// 生成 switch 表达式
     /// 使用递归生成嵌套的 if-else 链
-    fn generate_match(
+    fn generate_switch(
         &mut self,
         value: &Expression,
-        arms: &[MatchArm],
+        arms: &[SwitchArm],
     ) -> Result<(), CodegenError> {
         let function = self.current_function.unwrap();
         let i64_type = self.context.i64_type();
 
         // 生成要匹配的值
-        let match_value = self.generate_expression(value)?;
+        let switch_value = self.generate_expression(value)?;
 
         // 获取匹配的值并统一转换为 i64 进行比较
-        let match_int = if match_value.is_int_value() {
+        let switch_int = if switch_value.is_int_value() {
             // i32 扩展为 i64
             self.builder().build_int_s_extend(
-                match_value.into_int_value(),
+                switch_value.into_int_value(),
                 i64_type,
-                "match_i64",
+                "switch_i64",
             )?
-        } else if match_value.is_pointer_value() {
+        } else if switch_value.is_pointer_value() {
             // 指针转换为 i64
             self.builder().build_ptr_to_int(
-                match_value.into_pointer_value(),
+                switch_value.into_pointer_value(),
                 i64_type,
                 "ptr_to_int",
             )?
         } else {
             return Err(CodegenError {
-                message: "Match value must be integer or pointer type".to_string(),
+                message: "Switch value must be integer or pointer type".to_string(),
             });
         };
 
         // 创建合并块
-        let merge_block = self.context.append_basic_block(function, "match_merge");
+        let merge_block = self.context.append_basic_block(function, "switch_merge");
 
         // 递归生成 if-else 链
-        self.generate_match_arms(0, arms, match_int, i64_type, merge_block)?;
+        self.generate_switch_arms(0, arms, switch_int, i64_type, merge_block)?;
 
         // 设置合并块位置
         self.builder().position_at_end(merge_block);
@@ -1146,12 +1315,12 @@ impl<'ctx> CodeGenerator<'ctx> {
         Ok(())
     }
 
-    /// 递归生成 match 分支的 if-else 链
-    fn generate_match_arms(
+    /// 递归生成 switch 分支的 if-else 链
+    fn generate_switch_arms(
         &mut self,
         idx: usize,
-        arms: &[MatchArm],
-        match_int: inkwell::values::IntValue<'ctx>,
+        arms: &[SwitchArm],
+        switch_int: inkwell::values::IntValue<'ctx>,
         i64_type: inkwell::types::IntType<'ctx>,
         merge_block: inkwell::basic_block::BasicBlock<'ctx>,
     ) -> Result<(), CodegenError> {
@@ -1165,12 +1334,12 @@ impl<'ctx> CodeGenerator<'ctx> {
         let function = self.current_function.unwrap();
 
         // 为这个分支创建 then 块
-        let then_block = self.context.append_basic_block(function, "match_then");
+        let then_block = self.context.append_basic_block(function, "switch_then");
 
         // 确定 else 目标
         let else_block = if idx + 1 < arms.len() {
             // 还有更多分支，需要继续检查
-            self.context.append_basic_block(function, "match_else")
+            self.context.append_basic_block(function, "switch_else")
         } else {
             // 最后一个分支，跳转到 merge
             merge_block
@@ -1178,16 +1347,16 @@ impl<'ctx> CodeGenerator<'ctx> {
 
         // 生成条件比较
         let cond_i1: inkwell::values::IntValue<'ctx> = match &arm.pattern {
-            MatchPattern::Number(n) => {
+            SwitchPattern::Number(n) => {
                 let n_int = i64_type.const_int(*n as u64, false);
                 self.builder().build_int_compare(
                     inkwell::IntPredicate::EQ,
-                    match_int,
+                    switch_int,
                     n_int,
-                    "match_cond",
+                    "switch_cond",
                 )?
             },
-            MatchPattern::Identifier(name) => {
+            SwitchPattern::Identifier(name) => {
                 if let Some(ptr) = self.get_variable(name) {
                     let loaded = self.builder().build_load(ptr.get_type(), ptr, name)?;
                     let loaded_int = if loaded.is_int_value() {
@@ -1200,22 +1369,22 @@ impl<'ctx> CodeGenerator<'ctx> {
                         )?
                     } else {
                         return Err(CodegenError {
-                            message: "Match identifier must be integer or pointer type".to_string(),
+                            message: "Switch identifier must be integer or pointer type".to_string(),
                         });
                     };
                     self.builder().build_int_compare(
                         inkwell::IntPredicate::EQ,
-                        match_int,
+                        switch_int,
                         loaded_int,
-                        "match_cond",
+                        "switch_cond",
                     )?
                 } else {
                     // 变量不存在，条件为 false
                     i64_type.const_int(0, false)
                 }
             },
-            MatchPattern::Wildcard => {
-                // 通配符：条件始终为 true
+            SwitchPattern::Wildcard | SwitchPattern::Default => {
+                // 通配符/default：条件始终为 true
                 // 创建全 1 的 i64 值然后转换为 i1
                 let one = i64_type.const_int(1, false);
                 let zero = i64_type.const_int(0, false);
@@ -1223,7 +1392,7 @@ impl<'ctx> CodeGenerator<'ctx> {
                     inkwell::IntPredicate::NE,
                     one,
                     zero,
-                    "wildcard_cond",
+                    "default_cond",
                 )?
             },
         };
@@ -1241,7 +1410,7 @@ impl<'ctx> CodeGenerator<'ctx> {
         // 继续处理 else 分支
         if idx + 1 < arms.len() {
             self.builder().position_at_end(else_block);
-            self.generate_match_arms(idx + 1, arms, match_int, i64_type, merge_block)?;
+            self.generate_switch_arms(idx + 1, arms, switch_int, i64_type, merge_block)?;
         }
 
         Ok(())

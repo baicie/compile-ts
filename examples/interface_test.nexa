@@ -1,0 +1,7 @@
+// 测试空 interface
+interface Empty {
+}
+
+function main(): i32 {
+    return 42;
+}

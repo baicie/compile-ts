@@ -1,0 +1,5 @@
+// 测试 function 语法
+function main(): i32 {
+    let result: i32 = 1;
+    return result;
+}

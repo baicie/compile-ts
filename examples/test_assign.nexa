@@ -1,0 +1,5 @@
+// 测试赋值语句
+function main(): void {
+    let x: number = 5;
+    println("Hello");
+}

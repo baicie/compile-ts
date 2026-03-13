@@ -10,6 +10,7 @@ use std::str::Chars;
 pub enum Token {
     // 关键字 (TypeScript 风格)
     Function,
+    Fn,  // 闭包/函数表达式关键字
     Let,
     Const,
     If,
@@ -19,8 +20,9 @@ pub enum Token {
     Return,
     Break,
     Continue,
-    Match,
+    Switch,
     Case,
+    Default,
     Struct,
     Interface,
     Type,
@@ -209,6 +211,7 @@ impl<'a> Lexer<'a> {
         match name.as_str() {
             // TypeScript 关键字
             "function" => Token::Function,
+            "fn" => Token::Fn,
             "let" => Token::Let,
             "const" => Token::Const,
             "if" => Token::If,
@@ -218,8 +221,9 @@ impl<'a> Lexer<'a> {
             "return" => Token::Return,
             "break" => Token::Break,
             "continue" => Token::Continue,
-            "match" => Token::Match,
+            "switch" => Token::Switch,
             "case" => Token::Case,
+            "default" => Token::Default,
             "struct" => Token::Struct,
             "interface" => Token::Interface,
             "type" => Token::Type,

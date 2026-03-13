@@ -92,6 +92,28 @@ pub enum Expression {
         fields: Vec<(String, Expression)>,
         span: Span,
     },
+
+    /// 函数表达式（闭包）
+    FunctionExpression {
+        /// 参数列表
+        parameters: Vec<Parameter>,
+        /// 返回类型
+        return_type: Box<Type>,
+        /// 函数体
+        body: Box<Statement>,
+        /// 捕获的变量（闭包上下文）
+        captures: Vec<Capture>,
+        span: Span,
+    },
+}
+
+/// 闭包捕获的变量
+#[derive(Debug, Clone, PartialEq)]
+pub struct Capture {
+    /// 捕获的变量名
+    pub name: String,
+    /// 捕获方式（按值或按引用）
+    pub by_ref: bool,
 }
 
 /// 二元运算符
@@ -166,12 +188,12 @@ pub enum Statement {
         span: Span,
     },
 
-    /// match 表达式
-    Match {
+    /// switch 表达式
+    Switch {
         /// 要匹配的值
         value: Box<Expression>,
         /// 分支列表
-        arms: Vec<MatchArm>,
+        arms: Vec<SwitchArm>,
         span: Span,
     },
 
@@ -223,25 +245,27 @@ pub struct StructField {
     pub field_type: Type,
 }
 
-/// match 分支
+/// switch 分支
 #[derive(Debug, Clone, PartialEq)]
-pub struct MatchArm {
+pub struct SwitchArm {
     /// 匹配模式（数字或标识符）
-    pub pattern: MatchPattern,
+    pub pattern: SwitchPattern,
     /// 对应的语句
     pub body: Box<Statement>,
     pub span: Span,
 }
 
-/// match 模式
+/// switch 模式
 #[derive(Debug, Clone, PartialEq)]
-pub enum MatchPattern {
+pub enum SwitchPattern {
     /// 数字字面量
     Number(i64),
     /// 标识符（变量名或通配符）
     Identifier(String),
     /// 通配符（默认分支）
     Wildcard,
+    /// default 分支
+    Default,
 }
 
 /// 程序
@@ -249,5 +273,30 @@ pub enum MatchPattern {
 pub struct Program {
     pub functions: Vec<Function>,
     pub structs: Vec<StructDefinition>,
+    pub interfaces: Vec<InterfaceDefinition>,
     pub statements: Vec<Statement>,
+}
+
+/// 接口定义 (TypeScript 风格)
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceDefinition {
+    pub name: String,
+    pub fields: Vec<InterfaceField>,
+    pub methods: Vec<InterfaceMethod>,
+    pub span: Span,
+}
+
+/// 接口字段
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceField {
+    pub name: String,
+    pub field_type: Type,
+}
+
+/// 接口方法
+#[derive(Debug, Clone, PartialEq)]
+pub struct InterfaceMethod {
+    pub name: String,
+    pub parameters: Vec<Parameter>,
+    pub return_type: Type,
 }
