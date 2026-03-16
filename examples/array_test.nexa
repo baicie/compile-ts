@@ -1,0 +1,4 @@
+// 测试数组索引
+function main(): void {
+    let arr: number[] = [1, 2, 3];
+}

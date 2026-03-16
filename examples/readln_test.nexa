@@ -1,0 +1,4 @@
+// 测试 readln 输入功能 - 简化版本
+function main(): void {
+    let x: number = readln();
+}

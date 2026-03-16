@@ -105,6 +105,12 @@ pub enum Expression {
         captures: Vec<Capture>,
         span: Span,
     },
+
+    /// 数组字面量
+    ArrayLiteral {
+        elements: Vec<Expression>,
+        span: Span,
+    },
 }
 
 /// 闭包捕获的变量

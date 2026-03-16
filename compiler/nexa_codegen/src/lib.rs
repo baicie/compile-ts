@@ -987,13 +987,13 @@ impl<'ctx> CodeGenerator<'ctx> {
                 let index_i32 = self.coerce_to_i32(index_value)?;
 
                 // 使用 GEP 获取元素指针（假设数组元素是 i32）
+                // 注意：如果 array_ptr 已经指向数组数据，直接用 index_i32
                 let i32_type = self.context.i32_type();
-                let zero = i32_type.const_int(0, false);
                 let element_ptr = unsafe {
                     self.builder().build_in_bounds_gep(
                         i32_type,
                         array_ptr,
-                        &[zero, index_i32],
+                        &[index_i32],
                         "array_element_ptr",
                     )
                 }?;
@@ -1168,6 +1168,32 @@ impl<'ctx> CodeGenerator<'ctx> {
                 Err(CodegenError {
                     message: "Function expressions are not supported as values".to_string(),
                 })
+            },
+            Expression::ArrayLiteral { elements, span: _ } => {
+                // 数组字面量: 为每个元素分配内存
+                let i32_type = self.context.i32_type();
+                let _element_count = elements.len();
+
+                // 分配数组内存（使用 alloca）
+                let array_alloca = self.builder().build_alloca(i32_type, "array_literal")?;
+
+                // 存储每个元素
+                for (i, elem) in elements.iter().enumerate() {
+                    let elem_value = self.generate_expression(elem)?;
+                    let idx = i32_type.const_int(i as u64, false);
+                    let elem_ptr = unsafe {
+                        self.builder().build_in_bounds_gep(
+                            i32_type,
+                            array_alloca,
+                            &[idx],
+                            "array_element_ptr",
+                        )?
+                    };
+                    self.builder().build_store(elem_ptr, elem_value)?;
+                }
+
+                // 返回数组指针
+                Ok(array_alloca.into())
             },
         }
     }

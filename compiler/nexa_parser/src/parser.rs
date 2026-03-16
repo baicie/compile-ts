@@ -289,34 +289,55 @@ impl<'a> Parser<'a> {
     /// 解析类型 (TypeScript 风格)
     fn parse_type(&mut self) -> Result<Type, ParseError> {
         let start = self.position();
-        let ty = match self.peek() {
-            Token::NumberType => Type::Number,
-            Token::BooleanType => Type::Boolean,
-            Token::StringType => Type::String,
-            Token::Void => Type::Void,
-            Token::Undefined => Type::Undefined,
-            Token::Null => Type::Null,
-            Token::Any => Type::Any,
+        let mut ty = match self.peek() {
+            Token::NumberType => {
+                self.advance();
+                Type::Number
+            },
+            Token::BooleanType => {
+                self.advance();
+                Type::Boolean
+            },
+            Token::StringType => {
+                self.advance();
+                Type::String
+            },
+            Token::Void => {
+                self.advance();
+                Type::Void
+            },
+            Token::Undefined => {
+                self.advance();
+                Type::Undefined
+            },
+            Token::Null => {
+                self.advance();
+                Type::Null
+            },
+            Token::Any => {
+                self.advance();
+                Type::Any
+            },
             Token::Identifier(type_name) => {
                 // 检查内置类型别名
                 match type_name.as_str() {
                     "i32" | "i64" | "i16" | "i8" | "u32" | "u64" | "u16" | "u8" | "f32" | "f64" => {
                         self.advance();
-                        return Ok(Type::Number);
+                        Type::Number
                     },
                     "bool" => {
                         self.advance();
-                        return Ok(Type::Boolean);
+                        Type::Boolean
                     },
                     "str" => {
                         self.advance();
-                        return Ok(Type::String);
+                        Type::String
                     },
                     _ => {
                         // 自定义类型名（struct 名称）
                         let name = type_name.clone();
                         self.advance();
-                        return Ok(Type::Struct(name));
+                        Type::Struct(name)
                     },
                 }
             },
@@ -325,13 +346,13 @@ impl<'a> Parser<'a> {
                 self.advance();
                 self.expect_token(&Token::RightBracket)?;
                 let element_type = self.parse_type()?;
-                Type::Array(Box::new(element_type))
+                return Ok(Type::Array(Box::new(element_type)));
             },
             Token::Star => {
                 // 指针类型 *T
                 self.advance();
                 let pointee_type = self.parse_type()?;
-                Type::Pointer(Box::new(pointee_type))
+                return Ok(Type::Pointer(Box::new(pointee_type)));
             },
             _ => {
                 return Err(ParseError {
@@ -340,7 +361,14 @@ impl<'a> Parser<'a> {
                 })
             },
         };
-        self.advance();
+
+        // 检查是否是数组类型 T[]（后缀形式）
+        while *self.peek() == Token::LeftBracket {
+            self.advance();
+            self.expect_token(&Token::RightBracket)?;
+            ty = Type::Array(Box::new(ty));
+        }
+
         Ok(ty)
     }
 
@@ -994,6 +1022,18 @@ impl<'a> Parser<'a> {
             Token::Fn => {
                 // 解析函数表达式 (闭包)
                 self.parse_function_expression(start)
+            },
+            Token::LeftBracket => {
+                // 数组字面量 [1, 2, 3]
+                let mut elements = Vec::new();
+                while *self.peek() != Token::RightBracket {
+                    elements.push(self.parse_expression()?);
+                    if *self.peek() == Token::Comma {
+                        self.advance();
+                    }
+                }
+                self.expect_token(&Token::RightBracket)?;
+                Ok(Expression::ArrayLiteral { elements, span: self.span(start) })
             },
             _ => Err(ParseError {
                 message: format!("Unexpected token: {:?}", token),

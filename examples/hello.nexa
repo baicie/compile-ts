@@ -1,1 +1,3 @@
-fn main() { println("Hello from Nexa!"); }
+function main(): void {
+    println("Hello from Nexa!");
+}
