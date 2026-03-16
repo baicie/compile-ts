@@ -858,7 +858,56 @@ impl<'ctx> CodeGenerator<'ctx> {
                         )?;
                         Ok(nonzero.into())
                     },
-                    _ => Err(CodegenError { message: "Unsupported unary operator".to_string() }),
+                    UnaryOp::BitNot => {
+                        // 位取反
+                        if value.is_int_value() {
+                            let result = self.builder().build_not(value.into_int_value(), "not")?;
+                            Ok(result.into())
+                        } else {
+                            Err(CodegenError {
+                                message: "BitNot requires integer operand".to_string(),
+                            })
+                        }
+                    },
+                    UnaryOp::AddressOf => {
+                        // 取地址 &x
+                        // 需要特殊处理：因为 generate_expression 会返回加载后的值
+                        // 所以我们直接在 operand 是标识符时获取其指针
+                        if let Expression::Identifier(name, _) = operand.as_ref() {
+                            if let Some(ptr) = self.get_variable(name) {
+                                Ok(ptr.into())
+                            } else {
+                                Err(CodegenError {
+                                    message: format!("Variable {} not found for address-of", name),
+                                })
+                            }
+                        } else {
+                            Err(CodegenError {
+                                message: "AddressOf only supports variables".to_string(),
+                            })
+                        }
+                    },
+                    UnaryOp::Dereference => {
+                        // 解引用 *x
+                        // 需要特殊处理：因为 generate_expression 会返回加载后的值
+                        // 所以我们直接在 operand 是标识符时获取其指针
+                        if let Expression::Identifier(name, _) = operand.as_ref() {
+                            if let Some(ptr) = self.get_variable(name) {
+                                // 加载指针指向的值
+                                let i32_type = self.context.i32_type();
+                                let result = self.builder().build_load(i32_type, ptr, "deref")?;
+                                Ok(result)
+                            } else {
+                                Err(CodegenError {
+                                    message: format!("Variable {} not found for dereference", name),
+                                })
+                            }
+                        } else {
+                            Err(CodegenError {
+                                message: "Dereference only supports variables".to_string(),
+                            })
+                        }
+                    },
                 }
             },
             Expression::Call { callee, arguments, span: _ } => {
