@@ -13,7 +13,7 @@ use std::process::Command;
 fn print_parse_error(source: &str, error: &nexa_parser::ParseError) {
     let span = &error.span;
     eprintln!("error: {}", error.message);
-    eprintln!("  --> {}:{}:{}", "source", span.start.0 + 1, span.start.1 + 1);
+    eprintln!("  --> source:{}:{}", span.start.0 + 1, span.start.1 + 1);
 
     // 显示错误行的上下文
     let lines: Vec<&str> = source.lines().collect();
@@ -47,7 +47,7 @@ struct CliOptions {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum OutputType {
     Exe,
-    LLVMIR,
+    Llvmir,
     Asm,
     Object,
 }
@@ -150,7 +150,11 @@ fn parse_args(args: &[String]) -> Result<CliOptions, Box<dyn std::error::Error>>
                         "2" => OptimizationLevel::Default,
                         "3" => OptimizationLevel::Aggressive,
                         "s" | "z" => OptimizationLevel::Default,
-                        _ => return Err(format!("Invalid optimization level: {}", args[i + 1]).into()),
+                        _ => {
+                            return Err(
+                                format!("Invalid optimization level: {}", args[i + 1]).into()
+                            )
+                        },
                     };
                     i += 2;
                 } else {
@@ -169,7 +173,7 @@ fn parse_args(args: &[String]) -> Result<CliOptions, Box<dyn std::error::Error>>
                 if i + 1 < args.len() {
                     output_type = match args[i + 1].as_str() {
                         "exe" => OutputType::Exe,
-                        "llvm-ir" => OutputType::LLVMIR,
+                        "llvm-ir" => OutputType::Llvmir,
                         "asm" => OutputType::Asm,
                         "obj" => OutputType::Object,
                         _ => return Err(format!("Invalid output type: {}", args[i + 1]).into()),
@@ -206,7 +210,7 @@ fn parse_args(args: &[String]) -> Result<CliOptions, Box<dyn std::error::Error>>
 
     // 如果指定了 --emit-llvm 或 --emit-asm，覆盖 output_type
     if emit_llvm {
-        output_type = OutputType::LLVMIR;
+        output_type = OutputType::Llvmir;
     }
     if emit_asm {
         output_type = OutputType::Asm;
@@ -252,7 +256,7 @@ fn compile_and_execute(
 
     // 根据 output_type 处理输出
     match cli.output_type {
-        OutputType::LLVMIR => {
+        OutputType::Llvmir => {
             println!("\nGenerated LLVM IR:");
             println!("{}", module.print_to_string().to_string_lossy());
         },
@@ -327,10 +331,15 @@ fn compile_and_execute(
                 let object_file = temp_dir.join("nexa_temp.o");
 
                 target_machine
-                    .write_to_file(&module, inkwell::targets::FileType::Object, object_file.as_path())
+                    .write_to_file(
+                        &module,
+                        inkwell::targets::FileType::Object,
+                        object_file.as_path(),
+                    )
                     .map_err(|e| format!("Failed to write object file: {}", e))?;
 
-                let link_status = Command::new("clang").arg(&object_file).arg("-o").arg(output).status()?;
+                let link_status =
+                    Command::new("clang").arg(&object_file).arg("-o").arg(output).status()?;
 
                 let _ = std::fs::remove_file(&object_file);
 

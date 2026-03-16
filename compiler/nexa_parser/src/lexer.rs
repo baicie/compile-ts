@@ -10,7 +10,7 @@ use std::str::Chars;
 pub enum Token {
     // 关键字 (TypeScript 风格)
     Function,
-    Fn,  // 闭包/函数表达式关键字
+    Fn, // 闭包/函数表达式关键字
     Let,
     Const,
     If,

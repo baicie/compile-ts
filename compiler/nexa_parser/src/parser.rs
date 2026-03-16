@@ -136,7 +136,10 @@ impl<'a> Parser<'a> {
                                     self.advance();
                                     self.expect_token(&Token::Colon)?;
                                     let param_type = self.parse_type()?;
-                                    parameters.push(Parameter { name: param_n, type_annotation: param_type });
+                                    parameters.push(Parameter {
+                                        name: param_n,
+                                        type_annotation: param_type,
+                                    });
 
                                     if *self.peek() == Token::Comma {
                                         self.advance();
@@ -152,11 +155,7 @@ impl<'a> Parser<'a> {
                         self.expect_token(&Token::Colon)?;
                         let return_type = self.parse_type()?;
 
-                        methods.push(InterfaceMethod {
-                            name: field_name,
-                            parameters,
-                            return_type,
-                        });
+                        methods.push(InterfaceMethod { name: field_name, parameters, return_type });
                     } else {
                         // 解析字段
                         self.expect_token(&Token::Colon)?;
@@ -318,7 +317,7 @@ impl<'a> Parser<'a> {
                         let name = type_name.clone();
                         self.advance();
                         return Ok(Type::Struct(name));
-                    }
+                    },
                 }
             },
             Token::LeftBracket => {
@@ -1004,7 +1003,10 @@ impl<'a> Parser<'a> {
     }
 
     /// 解析函数表达式（闭包）
-    fn parse_function_expression(&mut self, start: (usize, usize)) -> Result<Expression, ParseError> {
+    fn parse_function_expression(
+        &mut self,
+        start: (usize, usize),
+    ) -> Result<Expression, ParseError> {
         // 参数列表
         self.expect_token(&Token::LeftParen)?;
         let mut parameters = Vec::new();
