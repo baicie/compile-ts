@@ -638,11 +638,12 @@ impl<'a> Parser<'a> {
 
     /// 解析赋值表达式
     fn parse_assignment(&mut self) -> Result<Expression, ParseError> {
-        let start = self.position();
-        let left = self.parse_logical_or()?;
+        // 先解析三元表达式
+        let left = self.parse_conditional()?;
 
         match self.peek() {
             Token::Equals => {
+                let start = self.position();
                 self.advance();
                 let right = self.parse_assignment()?;
                 Ok(Expression::Assignment {
@@ -653,6 +654,29 @@ impl<'a> Parser<'a> {
             },
             _ => Ok(left),
         }
+    }
+
+    /// 解析三元条件表达式 (condition ? then_expr : else_expr)
+    fn parse_conditional(&mut self) -> Result<Expression, ParseError> {
+        let start = self.position();
+        let condition = self.parse_logical_or()?;
+
+        // 检查是否是三元运算符
+        if *self.peek() == Token::Question {
+            self.advance(); // 跳过 ?
+            let then_expr = self.parse_conditional()?; // 使用递归解析以支持嵌套
+            self.expect_token(&Token::Colon)?;
+            let else_expr = self.parse_conditional()?;
+
+            return Ok(Expression::Ternary {
+                condition: Box::new(condition),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+                span: self.span(start),
+            });
+        }
+
+        Ok(condition)
     }
 
     /// 解析逻辑或

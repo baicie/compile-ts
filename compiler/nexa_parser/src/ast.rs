@@ -111,6 +111,14 @@ pub enum Expression {
         elements: Vec<Expression>,
         span: Span,
     },
+
+    /// 三元条件表达式
+    Ternary {
+        condition: Box<Expression>,
+        then_expr: Box<Expression>,
+        else_expr: Box<Expression>,
+        span: Span,
+    },
 }
 
 /// 闭包捕获的变量

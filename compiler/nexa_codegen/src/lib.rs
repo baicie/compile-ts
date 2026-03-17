@@ -1244,6 +1244,68 @@ impl<'ctx> CodeGenerator<'ctx> {
                 // 返回数组指针
                 Ok(array_alloca.into())
             },
+            Expression::Ternary { condition, then_expr, else_expr, span: _ } => {
+                // 三元表达式: condition ? then_expr : else_expr
+                let i32_type = self.context.i32_type();
+
+                // 生成条件值
+                let cond_value = self.generate_expression(condition)?;
+
+                // 将条件转换为 i1 进行分支判断
+                let cond_i1 = match cond_value {
+                    inkwell::values::BasicValueEnum::IntValue(v) => {
+                        // 如果是 i1 类型，直接使用
+                        if v.get_type().get_bit_width() == 1 {
+                            v
+                        } else {
+                            // 如果是 i32，转换为 i1 (非零为 true)
+                            let zero = i32_type.const_int(0, false);
+                            self.builder().build_int_compare(
+                                inkwell::IntPredicate::NE,
+                                v,
+                                zero,
+                                "cond",
+                            )?
+                        }
+                    },
+                    _ => {
+                        return Err(CodegenError {
+                            message: "Ternary condition must be integer".to_string(),
+                        });
+                    },
+                };
+
+                // 创建基本块
+                let current_function =
+                    self.builder().get_insert_block().and_then(|b| b.get_parent()).ok_or_else(
+                        || CodegenError { message: "Could not get current function".to_string() },
+                    )?;
+
+                let then_block = self.context.append_basic_block(current_function, "ternary_then");
+                let else_block = self.context.append_basic_block(current_function, "ternary_else");
+                let merge_block =
+                    self.context.append_basic_block(current_function, "ternary_merge");
+
+                // 条件分支
+                self.builder().build_conditional_branch(cond_i1, then_block, else_block)?;
+
+                // 生成 then 分支
+                self.builder().position_at_end(then_block);
+                let then_value = self.generate_expression(then_expr)?;
+                self.builder().build_unconditional_branch(merge_block)?;
+
+                // 生成 else 分支
+                self.builder().position_at_end(else_block);
+                let else_value = self.generate_expression(else_expr)?;
+                self.builder().build_unconditional_branch(merge_block)?;
+
+                // 在 merge 块中创建 phi 节点
+                self.builder().position_at_end(merge_block);
+                let phi = self.builder().build_phi(i32_type, "ternary_result")?;
+                phi.add_incoming(&[(&then_value, then_block), (&else_value, else_block)]);
+
+                Ok(phi.as_basic_value())
+            },
         }
     }
 
