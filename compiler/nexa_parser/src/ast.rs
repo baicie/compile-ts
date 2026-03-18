@@ -42,6 +42,8 @@ pub enum Expression {
     String(String, Span),
     Boolean(bool, Span),
     Identifier(String, Span),
+    /// this 关键字
+    This(Span),
 
     /// 赋值表达式
     Assignment {
@@ -86,6 +88,13 @@ pub enum Expression {
         span: Span,
     },
 
+    /// new 表达式 (构造函数调用)
+    New {
+        type_name: String,
+        args: Vec<Expression>,
+        span: Span,
+    },
+
     /// struct 字面量
     StructLiteral {
         name: String,
@@ -119,6 +128,47 @@ pub enum Expression {
         else_expr: Box<Expression>,
         span: Span,
     },
+
+    /// typeof 表达式
+    Typeof {
+        operand: Box<Expression>,
+        span: Span,
+    },
+
+    /// instanceof 表达式
+    Instanceof {
+        left: Box<Expression>,
+        right: Box<Expression>,
+        span: Span,
+    },
+
+    /// in 表达式
+    In {
+        left: Box<Expression>,
+        right: Box<Expression>,
+        span: Span,
+    },
+
+    /// delete 表达式
+    Delete {
+        operand: Box<Expression>,
+        span: Span,
+    },
+
+    /// 空值合并 ?? (NullishCoalescing)
+    NullishCoalescing {
+        left: Box<Expression>,
+        right: Box<Expression>,
+        span: Span,
+    },
+
+    /// 可选链 (OptionalChaining)
+    OptionalChain {
+        base: Box<Expression>,
+        // 链式调用: a?.b?.(args)?.[idx]
+        chains: Vec<OptionalChainItem>,
+        span: Span,
+    },
 }
 
 /// 闭包捕获的变量
@@ -128,6 +178,17 @@ pub struct Capture {
     pub name: String,
     /// 捕获方式（按值或按引用）
     pub by_ref: bool,
+}
+
+/// 可选链项目
+#[derive(Debug, Clone, PartialEq)]
+pub enum OptionalChainItem {
+    /// 成员访问 a?.b
+    Member(String),
+    /// 调用 a?.()
+    Call(Vec<Expression>),
+    /// 索引访问 a?.[0]
+    Index(Expression),
 }
 
 /// 二元运算符
@@ -140,6 +201,8 @@ pub enum BinaryOp {
     Modulo,
     Equals,
     NotEquals,
+    StrictEquals,    // ===
+    StrictNotEquals, // !==
     LessThan,
     LessThanOrEqual,
     GreaterThan,
@@ -149,8 +212,10 @@ pub enum BinaryOp {
     BitAnd,
     BitOr,
     BitXor,
-    LeftShift,
-    RightShift,
+    LeftShift,          // <<
+    RightShift,         // >>
+    UnsignedRightShift, // >>>
+    Exponent,           // **
     Concat,
 }
 
@@ -162,6 +227,8 @@ pub enum UnaryOp {
     BitNot,      // ~x
     Dereference, // *x
     AddressOf,   // &x
+    Typeof,      // typeof x
+    Delete,      // delete x.y
 }
 
 /// 语句
@@ -220,6 +287,21 @@ pub enum Statement {
     /// continue 语句
     Continue(Span),
 
+    /// do...while 循环
+    DoWhile { body: Box<Statement>, condition: Expression, span: Span },
+
+    /// throw 语句
+    Throw { value: Expression, span: Span },
+
+    /// try...catch...finally
+    TryCatchFinally {
+        try_body: Box<Statement>,
+        catch_var: Option<String>,
+        catch_body: Option<Box<Statement>>,
+        finally_body: Option<Box<Statement>>,
+        span: Span,
+    },
+
     /// 块语句
     Block(Vec<Statement>, Span),
 
@@ -235,6 +317,8 @@ pub struct Function {
     pub return_type: Type,
     pub body: Statement,
     pub span: Span,
+    #[allow(dead_code)]
+    pub is_variadic: bool,
 }
 
 /// 函数参数
@@ -249,7 +333,18 @@ pub struct Parameter {
 pub struct StructDefinition {
     pub name: String,
     pub fields: Vec<StructField>,
+    pub methods: Vec<Function>,
+    pub constructor: Option<Function>,
+    /// 类实现的接口列表
+    pub implements: Vec<String>,
     pub span: Span,
+}
+
+/// 类方法定义（存储在类外部）
+#[derive(Debug, Clone)]
+pub struct MethodDefinition {
+    pub class_name: String,
+    pub function: Function,
 }
 
 /// 结构体字段
@@ -335,6 +430,7 @@ pub struct ExportSpecifier {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub functions: Vec<Function>,
+    pub methods: Vec<Function>,
     pub structs: Vec<StructDefinition>,
     pub interfaces: Vec<InterfaceDefinition>,
     pub statements: Vec<Statement>,

@@ -30,7 +30,9 @@ pub enum Token {
     New,
     This,
     Class,
+    Constructor,
     Extends,
+    Implements,
     Super,
     Public,
     Private,
@@ -43,6 +45,27 @@ pub enum Token {
     Export,
     From,
     As,
+
+    // 新增关键字
+    Var,
+    Throw,
+    Try,
+    Catch,
+    Finally,
+    Do,
+    Typeof,
+    Instanceof,
+    In,
+    Delete,
+    Yield,
+    Debugger,
+    With,
+    Declare,
+    Namespace,
+    Module,
+    Abstract,
+    Get,
+    Set,
 
     // 类型 (TypeScript 风格) - 使用 Type 后缀避免与字面量冲突
     NumberType,
@@ -99,6 +122,21 @@ pub enum Token {
     Question,
     QuestionDot,
     Arrow,
+
+    // 新增运算符
+    StrictEquals,             // ===
+    StrictNotEquals,          // !==
+    Exponent,                 // **
+    ExponentEquals,           // **=
+    LeftShift,                // <<
+    RightShift,               // >>
+    UnsignedRightShift,       // >>>
+    LeftShiftEquals,          // <<=
+    RightShiftEquals,         // >>=
+    UnsignedRightShiftEquals, // >>>=
+    NullishCoalescing,        // ??
+    OptionalChain,            // ?. (在表达式解析中处理)
+    DoubleTilde,              // ~~ (按位非两次用于取整)
 
     // 特殊
     Eof,
@@ -235,7 +273,9 @@ impl<'a> Lexer<'a> {
             "new" => Token::New,
             "this" => Token::This,
             "class" => Token::Class,
+            "constructor" => Token::Constructor,
             "extends" => Token::Extends,
+            "implements" => Token::Implements,
             "super" => Token::Super,
             "public" => Token::Public,
             "private" => Token::Private,
@@ -248,6 +288,26 @@ impl<'a> Lexer<'a> {
             "export" => Token::Export,
             "from" => Token::From,
             "as" => Token::As,
+            // 新增关键字
+            "var" => Token::Var,
+            "throw" => Token::Throw,
+            "try" => Token::Try,
+            "catch" => Token::Catch,
+            "finally" => Token::Finally,
+            "do" => Token::Do,
+            "typeof" => Token::Typeof,
+            "instanceof" => Token::Instanceof,
+            "in" => Token::In,
+            "delete" => Token::Delete,
+            "yield" => Token::Yield,
+            "debugger" => Token::Debugger,
+            "with" => Token::With,
+            "declare" => Token::Declare,
+            "namespace" => Token::Namespace,
+            "module" => Token::Module,
+            "abstract" => Token::Abstract,
+            "get" => Token::Get,
+            "set" => Token::Set,
             // TypeScript 类型
             "number" => Token::NumberType,
             "boolean" => Token::BooleanType,
@@ -390,7 +450,31 @@ impl<'a> Lexer<'a> {
                 }
             },
             '-' => self.match_or(Token::Minus, '=', Token::MinusEquals, Token::Minus),
-            '*' => self.match_or(Token::Star, '=', Token::StarEquals, Token::Star),
+            '*' => {
+                if let Some(&ch) = self.peek_char() {
+                    if ch == '*' {
+                        self.next_char();
+                        // 检查是否是 **=
+                        if let Some(&next_ch) = self.peek_char() {
+                            if next_ch == '=' {
+                                self.next_char();
+                                Token::ExponentEquals
+                            } else {
+                                Token::Exponent
+                            }
+                        } else {
+                            Token::Exponent
+                        }
+                    } else if ch == '=' {
+                        self.next_char();
+                        Token::StarEquals
+                    } else {
+                        Token::Star
+                    }
+                } else {
+                    Token::Star
+                }
+            },
             '/' => self.match_or(Token::Slash, '=', Token::SlashEquals, Token::Slash),
             '%' => Token::Percent,
             '=' => {
@@ -400,7 +484,17 @@ impl<'a> Lexer<'a> {
                         Token::EqualsGreaterThan
                     } else if ch == '=' {
                         self.next_char();
-                        Token::EqualsEquals
+                        // 检查是否是 ===
+                        if let Some(&next_ch) = self.peek_char() {
+                            if next_ch == '=' {
+                                self.next_char();
+                                Token::StrictEquals
+                            } else {
+                                Token::EqualsEquals
+                            }
+                        } else {
+                            Token::EqualsEquals
+                        }
                     } else {
                         Token::Equals
                     }
@@ -408,21 +502,112 @@ impl<'a> Lexer<'a> {
                     Token::Equals
                 }
             },
-            '!' => self.match_or(Token::Bang, '=', Token::BangEquals, Token::Bang),
-            '<' => self.match_or(Token::LessThan, '=', Token::LessThanOrEqual, Token::LessThan),
-            '>' => self.match_or(
-                Token::GreaterThan,
-                '=',
-                Token::GreaterThanOrEqual,
-                Token::GreaterThan,
-            ),
+            '!' => {
+                if let Some(&ch) = self.peek_char() {
+                    if ch == '=' {
+                        self.next_char();
+                        // 检查是否是 !==
+                        if let Some(&next_ch) = self.peek_char() {
+                            if next_ch == '=' {
+                                self.next_char();
+                                Token::StrictNotEquals
+                            } else {
+                                Token::BangEquals
+                            }
+                        } else {
+                            Token::BangEquals
+                        }
+                    } else {
+                        Token::Bang
+                    }
+                } else {
+                    Token::Bang
+                }
+            },
+            '<' => {
+                if let Some(&ch) = self.peek_char() {
+                    if ch == '=' {
+                        self.next_char();
+                        Token::LessThanOrEqual
+                    } else if ch == '<' {
+                        self.next_char();
+                        // 检查是否是 <<=
+                        if let Some(&next_ch) = self.peek_char() {
+                            if next_ch == '=' {
+                                self.next_char();
+                                Token::LeftShiftEquals
+                            } else {
+                                Token::LeftShift
+                            }
+                        } else {
+                            Token::LeftShift
+                        }
+                    } else {
+                        Token::LessThan
+                    }
+                } else {
+                    Token::LessThan
+                }
+            },
+            '>' => {
+                if let Some(&ch) = self.peek_char() {
+                    if ch == '=' {
+                        self.next_char();
+                        Token::GreaterThanOrEqual
+                    } else if ch == '>' {
+                        self.next_char();
+                        // 检查是否是 >>> 或 >>=
+                        if let Some(&next_ch) = self.peek_char() {
+                            if next_ch == '>' {
+                                // >>> 或 >>>=
+                                self.next_char();
+                                if let Some(&next_next_ch) = self.peek_char() {
+                                    if next_next_ch == '=' {
+                                        self.next_char();
+                                        Token::UnsignedRightShiftEquals
+                                    } else {
+                                        Token::UnsignedRightShift
+                                    }
+                                } else {
+                                    Token::UnsignedRightShift
+                                }
+                            } else if next_ch == '=' {
+                                self.next_char();
+                                Token::RightShiftEquals
+                            } else {
+                                Token::RightShift
+                            }
+                        } else {
+                            Token::RightShift
+                        }
+                    } else {
+                        Token::GreaterThan
+                    }
+                } else {
+                    Token::GreaterThan
+                }
+            },
             '&' => {
                 self.match_or(Token::Ampersand, '&', Token::AmpersandAmpersand, Token::Ampersand)
             },
             '|' => self.match_or(Token::Pipe, '|', Token::PipePipe, Token::Pipe),
             '^' => Token::Caret,
             '~' => Token::Tilde,
-            '?' => Token::Question,
+            '?' => {
+                if let Some(&ch) = self.peek_char() {
+                    if ch == '?' {
+                        self.next_char();
+                        Token::NullishCoalescing
+                    } else if ch == '.' {
+                        self.next_char();
+                        Token::OptionalChain
+                    } else {
+                        Token::Question
+                    }
+                } else {
+                    Token::Question
+                }
+            },
             _ => Token::Error(format!("Unexpected character: {}", ch)),
         }
     }

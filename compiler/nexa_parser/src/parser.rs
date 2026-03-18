@@ -64,6 +64,7 @@ impl<'a> Parser<'a> {
     /// 解析程序
     pub fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut functions = Vec::new();
+        let mut methods = Vec::new();
         let mut statements = Vec::new();
         let mut structs = Vec::new();
         let mut interfaces = Vec::new();
@@ -92,6 +93,17 @@ impl<'a> Parser<'a> {
                     Ok(i) => interfaces.push(i),
                     Err(e) => return Err(e),
                 },
+                Token::Class => match self.parse_class_definition() {
+                    Ok(c) => {
+                        // 提取类中的方法并添加到 methods 列表
+                        for method in &c.methods {
+                            methods.push(method.clone());
+                        }
+                        // class 作为特殊的 struct 处理
+                        structs.push(c);
+                    },
+                    Err(e) => return Err(e),
+                },
                 _ => match self.parse_statement() {
                     Ok(stmt) => statements.push(stmt),
                     Err(e) => return Err(e),
@@ -99,7 +111,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        Ok(Program { functions, structs, interfaces, statements, imports, exports })
+        Ok(Program { functions, methods, structs, interfaces, statements, imports, exports })
     }
 
     /// 解析导入声明
@@ -663,7 +675,200 @@ impl<'a> Parser<'a> {
 
         self.expect_token(&Token::RightBrace)?;
 
-        Ok(StructDefinition { name, fields, span: self.span(start) })
+        Ok(StructDefinition {
+            name,
+            fields,
+            methods: Vec::new(),
+            constructor: None,
+            implements: Vec::new(),
+            span: self.span(start),
+        })
+    }
+
+    /// 解析类定义 (TypeScript 风格)
+    fn parse_class_definition(&mut self) -> Result<StructDefinition, ParseError> {
+        let start = self.position();
+        self.expect_token(&Token::Class)?;
+
+        let class_name = match self.peek() {
+            Token::Identifier(name) => name.clone(),
+            _ => {
+                return Err(ParseError {
+                    message: "Expected class name".to_string(),
+                    span: self.span(start),
+                })
+            },
+        };
+        self.advance();
+
+        // 处理 implements 子句 (可选)
+        let implements_interfaces: Vec<String> = if *self.peek() == Token::Implements {
+            self.advance();
+            let mut interfaces = Vec::new();
+            loop {
+                match self.peek() {
+                    Token::Identifier(name) => {
+                        interfaces.push(name.clone());
+                        self.advance();
+                    },
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected interface name after implements".to_string(),
+                            span: self.span(self.position()),
+                        })
+                    },
+                }
+                if *self.peek() == Token::Comma {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            interfaces
+        } else {
+            Vec::new()
+        };
+
+        let _ = implements_interfaces;
+
+        self.expect_token(&Token::LeftBrace)?;
+
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut constructor = None;
+
+        let name = class_name;
+
+        while *self.peek() != Token::RightBrace {
+            let current_token = self.peek().clone();
+            match current_token {
+                Token::Constructor => {
+                    // 构造函数
+                    self.advance();
+                    self.expect_token(&Token::LeftParen)?;
+                    // 解析参数
+                    let mut params = Vec::new();
+                    while *self.peek() != Token::RightParen {
+                        let param_name = match self.peek() {
+                            Token::Identifier(n) => n.clone(),
+                            _ => {
+                                return Err(ParseError {
+                                    message: "Expected parameter name".to_string(),
+                                    span: self.span(self.position()),
+                                })
+                            },
+                        };
+                        self.advance();
+                        self.expect_token(&Token::Colon)?;
+                        let param_type = self.parse_type()?;
+                        params.push(Parameter { name: param_name, type_annotation: param_type });
+                        if *self.peek() == Token::Comma {
+                            self.advance();
+                        }
+                    }
+                    self.expect_token(&Token::RightParen)?;
+
+                    // 解析返回类型（构造函数返回 void）
+                    let return_type = if *self.peek() == Token::Colon {
+                        self.advance();
+                        self.parse_type()?
+                    } else {
+                        Type::Void
+                    };
+
+                    // 解析函数体
+                    let body = self.parse_block()?;
+
+                    constructor = Some(Function {
+                        name: format!("{}_constructor", name),
+                        parameters: params,
+                        return_type,
+                        body,
+                        is_variadic: false,
+                        span: self.span(start),
+                    });
+                },
+                Token::Identifier(method_name) => {
+                    // 可能是方法或字段
+                    let name = method_name.clone();
+                    self.advance();
+
+                    let peek_token = self.peek().clone();
+                    if peek_token == Token::LeftParen {
+                        // 这是一个方法
+                        self.advance(); // 跳过 (
+                        let mut params = Vec::new();
+                        while *self.peek() != Token::RightParen {
+                            let param_name = match self.peek() {
+                                Token::Identifier(n) => n.clone(),
+                                _ => {
+                                    return Err(ParseError {
+                                        message: "Expected parameter name".to_string(),
+                                        span: self.span(self.position()),
+                                    })
+                                },
+                            };
+                            self.advance();
+                            self.expect_token(&Token::Colon)?;
+                            let param_type = self.parse_type()?;
+                            params
+                                .push(Parameter { name: param_name, type_annotation: param_type });
+                            if *self.peek() == Token::Comma {
+                                self.advance();
+                            }
+                        }
+                        self.expect_token(&Token::RightParen)?;
+
+                        // 返回类型
+                        self.expect_token(&Token::Colon)?;
+                        let return_type = self.parse_type()?;
+
+                        // 函数体
+                        let body = self.parse_block()?;
+
+                        methods.push(Function {
+                            name: format!("{}_{}", name, name),
+                            parameters: params,
+                            return_type,
+                            body,
+                            is_variadic: false,
+                            span: self.span(start),
+                        });
+                    } else if peek_token == Token::Colon {
+                        // 这是一个字段
+                        self.advance();
+                        let field_type = self.parse_type()?;
+                        fields.push(StructField { name, field_type });
+
+                        if *self.peek() == Token::Comma {
+                            self.advance();
+                        }
+                    } else {
+                        return Err(ParseError {
+                            message: "Expected ':' or '(' after field/method name".to_string(),
+                            span: self.span(self.position()),
+                        });
+                    }
+                },
+                _ => {
+                    return Err(ParseError {
+                        message: "Expected field, method, or constructor".to_string(),
+                        span: self.span(self.position()),
+                    })
+                },
+            }
+        }
+
+        self.expect_token(&Token::RightBrace)?;
+
+        Ok(StructDefinition {
+            name,
+            fields,
+            methods,
+            constructor,
+            implements: implements_interfaces,
+            span: self.span(start),
+        })
     }
 
     /// 解析函数
@@ -719,7 +924,14 @@ impl<'a> Parser<'a> {
         // 函数体
         let body = self.parse_block()?;
 
-        Ok(Function { name, parameters, return_type, body, span: self.span(start) })
+        Ok(Function {
+            name,
+            parameters,
+            return_type,
+            body,
+            span: self.span(start),
+            is_variadic: false,
+        })
     }
 
     /// 解析类型 (TypeScript 风格)
@@ -810,13 +1022,18 @@ impl<'a> Parser<'a> {
 
     /// 解析语句
     fn parse_statement(&mut self) -> Result<Statement, ParseError> {
-        match self.peek() {
+        let current_token = self.peek().clone();
+        match current_token {
             Token::Let | Token::Const => self.parse_variable_declaration(),
+            Token::Var => self.parse_variable_declaration(),
             Token::If => self.parse_if_statement(),
             Token::While => self.parse_while_statement(),
             Token::For => self.parse_for_statement(),
+            Token::Do => self.parse_do_while_statement(),
             Token::Switch => self.parse_switch_statement(),
             Token::Return => self.parse_return_statement(),
+            Token::Throw => self.parse_throw_statement(),
+            Token::Try => self.parse_try_catch_finally_statement(),
             Token::Break => {
                 let start = self.position();
                 self.advance();
@@ -1060,6 +1277,80 @@ impl<'a> Parser<'a> {
         Ok(Statement::Return(value, self.span(start)))
     }
 
+    /// 解析 do...while 语句
+    fn parse_do_while_statement(&mut self) -> Result<Statement, ParseError> {
+        let start = self.position();
+        self.advance(); // 跳过 do
+
+        let body = Box::new(self.parse_statement()?);
+
+        // expect "while" 关键字
+        self.expect_token(&Token::While)?;
+        self.expect_token(&Token::LeftParen)?;
+        let condition = self.parse_expression()?;
+        self.expect_token(&Token::RightParen)?;
+
+        // 分号
+        if *self.peek() == Token::SemiColon {
+            self.advance();
+        }
+
+        Ok(Statement::DoWhile { body, condition, span: self.span(start) })
+    }
+
+    /// 解析 throw 语句
+    fn parse_throw_statement(&mut self) -> Result<Statement, ParseError> {
+        let start = self.position();
+        self.advance(); // 跳过 throw
+
+        let value = self.parse_expression()?;
+
+        self.expect_token(&Token::SemiColon)?;
+
+        Ok(Statement::Throw { value, span: self.span(start) })
+    }
+
+    /// 解析 try...catch...finally 语句
+    fn parse_try_catch_finally_statement(&mut self) -> Result<Statement, ParseError> {
+        let start = self.position();
+        self.advance(); // 跳过 try
+
+        let try_body = Box::new(self.parse_block()?);
+
+        let mut catch_var = None;
+        let mut catch_body = None;
+        let mut finally_body = None;
+
+        // 解析 catch 块
+        if *self.peek() == Token::Catch {
+            self.advance(); // 跳过 catch
+            self.expect_token(&Token::LeftParen)?;
+
+            // 解析 catch 变量 (可选)
+            if let Token::Identifier(name) = self.peek() {
+                catch_var = Some(name.clone());
+                self.advance();
+            }
+
+            self.expect_token(&Token::RightParen)?;
+            catch_body = Some(Box::new(self.parse_block()?));
+        }
+
+        // 解析 finally 块
+        if *self.peek() == Token::Finally {
+            self.advance(); // 跳过 finally
+            finally_body = Some(Box::new(self.parse_block()?));
+        }
+
+        Ok(Statement::TryCatchFinally {
+            try_body,
+            catch_var,
+            catch_body,
+            finally_body,
+            span: self.span(start),
+        })
+    }
+
     /// 解析表达式语句
     fn parse_expression_statement(&mut self) -> Result<Statement, ParseError> {
         let expr = self.parse_expression()?;
@@ -1095,12 +1386,12 @@ impl<'a> Parser<'a> {
     /// 解析三元条件表达式 (condition ? then_expr : else_expr)
     fn parse_conditional(&mut self) -> Result<Expression, ParseError> {
         let start = self.position();
-        let condition = self.parse_logical_or()?;
+        let condition = self.parse_nullish_coalescing()?;
 
         // 检查是否是三元运算符
         if *self.peek() == Token::Question {
             self.advance(); // 跳过 ?
-            let then_expr = self.parse_conditional()?; // 使用递归解析以支持嵌套
+            let then_expr = self.parse_nullish_coalescing()?;
             self.expect_token(&Token::Colon)?;
             let else_expr = self.parse_conditional()?;
 
@@ -1129,6 +1420,25 @@ impl<'a> Parser<'a> {
                 right: Box::new(right),
                 span: self.span(start),
             };
+        }
+
+        Ok(left)
+    }
+
+    /// 解析空值合并 (NullishCoalescing)
+    fn parse_nullish_coalescing(&mut self) -> Result<Expression, ParseError> {
+        let start = self.position();
+        let left = self.parse_logical_or()?;
+
+        // 空值合并优先级低于逻辑或，但高于三元
+        if *self.peek() == Token::NullishCoalescing {
+            self.advance();
+            let right = self.parse_logical_or()?;
+            return Ok(Expression::NullishCoalescing {
+                left: Box::new(left),
+                right: Box::new(right),
+                span: self.span(start),
+            });
         }
 
         Ok(left)
@@ -1215,10 +1525,16 @@ impl<'a> Parser<'a> {
         let start = self.position();
         let mut left = self.parse_comparison()?;
 
-        while let Token::EqualsEquals | Token::BangEquals = self.peek().clone() {
+        while let Token::EqualsEquals
+        | Token::BangEquals
+        | Token::StrictEquals
+        | Token::StrictNotEquals = self.peek().clone()
+        {
             let op = match self.peek() {
                 Token::EqualsEquals => BinaryOp::Equals,
                 Token::BangEquals => BinaryOp::NotEquals,
+                Token::StrictEquals => BinaryOp::StrictEquals,
+                Token::StrictNotEquals => BinaryOp::StrictNotEquals,
                 _ => unreachable!(),
             };
             self.advance();
@@ -1242,13 +1558,35 @@ impl<'a> Parser<'a> {
         while let Token::LessThan
         | Token::LessThanOrEqual
         | Token::GreaterThan
-        | Token::GreaterThanOrEqual = self.peek().clone()
+        | Token::GreaterThanOrEqual
+        | Token::Instanceof
+        | Token::In = self.peek().clone()
         {
             let op = match self.peek() {
                 Token::LessThan => BinaryOp::LessThan,
                 Token::LessThanOrEqual => BinaryOp::LessThanOrEqual,
                 Token::GreaterThan => BinaryOp::GreaterThan,
                 Token::GreaterThanOrEqual => BinaryOp::GreaterThanOrEqual,
+                Token::Instanceof => {
+                    self.advance();
+                    let right = self.parse_shift()?;
+                    left = Expression::Instanceof {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                        span: self.span(start),
+                    };
+                    continue;
+                },
+                Token::In => {
+                    self.advance();
+                    let right = self.parse_shift()?;
+                    left = Expression::In {
+                        left: Box::new(left),
+                        right: Box::new(right),
+                        span: self.span(start),
+                    };
+                    continue;
+                },
                 _ => unreachable!(),
             };
             self.advance();
@@ -1266,10 +1604,28 @@ impl<'a> Parser<'a> {
 
     /// 解析位移
     fn parse_shift(&mut self) -> Result<Expression, ParseError> {
-        let _start = self.position();
-        let left = self.parse_addition()?;
+        let start = self.position();
+        let mut left = self.parse_addition()?;
 
-        // 暂时不支持位移运算符
+        while let Token::LeftShift | Token::RightShift | Token::UnsignedRightShift =
+            self.peek().clone()
+        {
+            let op = match self.peek() {
+                Token::LeftShift => BinaryOp::LeftShift,
+                Token::RightShift => BinaryOp::RightShift,
+                Token::UnsignedRightShift => BinaryOp::UnsignedRightShift,
+                _ => unreachable!(),
+            };
+            self.advance();
+            let right = self.parse_addition()?;
+            left = Expression::Binary {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+                span: self.span(start),
+            };
+        }
+
         Ok(left)
     }
 
@@ -1303,11 +1659,14 @@ impl<'a> Parser<'a> {
         let start = self.position();
         let mut left = self.parse_unary()?;
 
-        while let Token::Star | Token::Slash | Token::Percent = self.peek().clone() {
+        while let Token::Star | Token::Slash | Token::Percent | Token::Exponent =
+            self.peek().clone()
+        {
             let op = match self.peek() {
                 Token::Star => BinaryOp::Multiply,
                 Token::Slash => BinaryOp::Divide,
                 Token::Percent => BinaryOp::Modulo,
+                Token::Exponent => BinaryOp::Exponent,
                 _ => unreachable!(),
             };
             self.advance();
@@ -1328,6 +1687,36 @@ impl<'a> Parser<'a> {
         let start = self.position();
 
         match self.peek() {
+            Token::New => {
+                // new TypeName(args)
+                self.advance();
+                let type_name = match self.peek() {
+                    Token::Identifier(name) => {
+                        let n = name.clone();
+                        self.advance();
+                        n
+                    },
+                    _ => {
+                        return Err(ParseError {
+                            message: "Expected type name after 'new'".to_string(),
+                            span: self.span(start),
+                        })
+                    },
+                };
+
+                // 解析构造函数的参数
+                self.expect_token(&Token::LeftParen)?;
+                let mut args = Vec::new();
+                while *self.peek() != Token::RightParen {
+                    args.push(self.parse_expression()?);
+                    if *self.peek() == Token::Comma {
+                        self.advance();
+                    }
+                }
+                self.expect_token(&Token::RightParen)?;
+
+                Ok(Expression::New { type_name, args, span: self.span(start) })
+            },
             Token::Minus => {
                 self.advance();
                 let operand = self.parse_unary()?;
@@ -1363,6 +1752,16 @@ impl<'a> Parser<'a> {
                     operand: Box::new(operand),
                     span: self.span(start),
                 })
+            },
+            Token::Typeof => {
+                self.advance();
+                let operand = self.parse_unary()?;
+                Ok(Expression::Typeof { operand: Box::new(operand), span: self.span(start) })
+            },
+            Token::Delete => {
+                self.advance();
+                let operand = self.parse_unary()?;
+                Ok(Expression::Delete { operand: Box::new(operand), span: self.span(start) })
             },
             _ => self.parse_call(),
         }
@@ -1421,7 +1820,7 @@ impl<'a> Parser<'a> {
                 },
                 Token::LeftBrace => {
                     // 可能是 struct 字面量 { field: value, ... }
-                    // 需要回退并重新解析
+                    // 只有当 expr 是标识符（类型名）时才处理
                     if let Expression::Identifier(type_name, _) = &expr {
                         // 检查是否是 struct 字面量
                         self.advance(); // 跳过 {
@@ -1451,6 +1850,7 @@ impl<'a> Parser<'a> {
                             span: self.span(start),
                         };
                     } else {
+                        // 不是 struct 字面量，退出循环
                         break;
                     }
                 },
@@ -1474,6 +1874,7 @@ impl<'a> Parser<'a> {
             Token::StringLiteral(s) => Ok(Expression::String(s, self.span(start))),
             Token::Boolean(b) => Ok(Expression::Boolean(b, self.span(start))),
             Token::Identifier(name) => Ok(Expression::Identifier(name, self.span(start))),
+            Token::This => Ok(Expression::This(self.span(start))),
             Token::LeftParen => {
                 let expr = self.parse_expression()?;
                 self.expect_token(&Token::RightParen)?;
@@ -1494,6 +1895,37 @@ impl<'a> Parser<'a> {
                 }
                 self.expect_token(&Token::RightBracket)?;
                 Ok(Expression::ArrayLiteral { elements, span: self.span(start) })
+            },
+            Token::LeftBrace => {
+                // 对象/struct 字面量 { x: 1, y: 2 }
+                // 没有类型前缀，解析为匿名 struct
+                self.advance(); // 跳过 {
+                let mut fields = Vec::new();
+                while *self.peek() != Token::RightBrace {
+                    let field_name = match self.peek() {
+                        Token::Identifier(name) => name.clone(),
+                        _ => {
+                            return Err(ParseError {
+                                message: "Expected field name".to_string(),
+                                span: self.span(self.position()),
+                            })
+                        },
+                    };
+                    self.advance();
+                    self.expect_token(&Token::Colon)?;
+                    let field_value = self.parse_expression()?;
+                    fields.push((field_name, field_value));
+                    if *self.peek() == Token::Comma {
+                        self.advance();
+                    }
+                }
+                self.expect_token(&Token::RightBrace)?;
+                // 对于没有类型前缀的 struct 字面量，使用空名称
+                Ok(Expression::StructLiteral {
+                    name: String::new(),
+                    fields,
+                    span: self.span(start),
+                })
             },
             _ => Err(ParseError {
                 message: format!("Unexpected token: {:?}", token),

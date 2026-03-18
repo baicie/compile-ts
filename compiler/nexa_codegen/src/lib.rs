@@ -40,6 +40,8 @@ pub struct CodeGenerator<'ctx> {
     type_mapper: TypeMapper<'ctx>,
     /// Struct 类型定义映射
     struct_types: HashMap<String, inkwell::types::StructType<'ctx>>,
+    /// Struct 字段定义映射 (struct名 -> 字段列表)
+    struct_field_lists: HashMap<String, Vec<String>>,
     /// 导入的符号表 (模块路径 -> 符号)
     imported_symbols: HashMap<String, nexa_parser::module::SymbolTable>,
 }
@@ -59,6 +61,7 @@ impl<'ctx> CodeGenerator<'ctx> {
             variable_types: HashMap::new(),
             type_mapper,
             struct_types: HashMap::new(),
+            struct_field_lists: HashMap::new(),
             imported_symbols: HashMap::new(),
         }
     }
@@ -172,6 +175,7 @@ impl<'ctx> CodeGenerator<'ctx> {
     pub fn declare_builtin_functions(&mut self) {
         let i8_ptr = self.context.ptr_type(AddressSpace::default());
         let i32_type = self.context.i32_type();
+        let i64_type = self.context.i64_type();
 
         // puts - C 标准库输出字符串
         let puts_type = i32_type.fn_type(&[i8_ptr.into()], false);
@@ -188,6 +192,145 @@ impl<'ctx> CodeGenerator<'ctx> {
         // readln_i32 - 读取整数
         let readln_i32_type = i32_type.fn_type(&[], false);
         self.module.add_function("readln_i32", readln_i32_type, None);
+
+        // std_io_readln - 读取一行字符串（返回 char*）
+        let readln_type = i8_ptr.fn_type(&[], false);
+        self.module.add_function("std_io_readln", readln_type, None);
+
+        // std_io_println_i32 - 打印整数并换行
+        let println_i32_type = i32_type.fn_type(&[i32_type.into()], false);
+        self.module.add_function("std_io_println_i32", println_i32_type, None);
+
+        // std_io_print_i32 - 打印整数不换行
+        let print_i32_type = i32_type.fn_type(&[i32_type.into()], false);
+        self.module.add_function("std_io_print_i32", print_i32_type, None);
+
+        // strlen - 获取字符串长度
+        let strlen_type = i32_type.fn_type(&[i8_ptr.into()], false);
+        self.module.add_function("strlen", strlen_type, None);
+
+        // malloc - 动态内存分配
+        let malloc_type = i8_ptr.fn_type(&[i64_type.into()], false);
+        self.module.add_function("malloc", malloc_type, None);
+
+        // strcpy - 字符串复制
+        let strcpy_type = i8_ptr.fn_type(&[i8_ptr.into(), i8_ptr.into()], false);
+        self.module.add_function("strcpy", strcpy_type, None);
+
+        // strcat - 字符串连接
+        let strcat_type = i8_ptr.fn_type(&[i8_ptr.into(), i8_ptr.into()], false);
+        self.module.add_function("strcat", strcat_type, None);
+
+        // ============ 文件 IO 函数 ============
+
+        // std_io_fopen - 打开文件
+        let fopen_type = i8_ptr.fn_type(&[i8_ptr.into(), i8_ptr.into()], false);
+        self.module.add_function("std_io_fopen", fopen_type, None);
+
+        // std_io_fclose - 关闭文件
+        let fclose_type = i32_type.fn_type(&[i8_ptr.into()], false);
+        self.module.add_function("std_io_fclose", fclose_type, None);
+
+        // std_io_fgets - 读取一行
+        let fgets_type = i8_ptr.fn_type(&[i8_ptr.into(), i32_type.into(), i8_ptr.into()], false);
+        self.module.add_function("std_io_fgets", fgets_type, None);
+
+        // std_io_fputs - 写入字符串
+        let fputs_type = i32_type.fn_type(&[i8_ptr.into(), i8_ptr.into()], false);
+        self.module.add_function("std_io_fputs", fputs_type, None);
+
+        // std_io_feof - 检查文件结束
+        let feof_type = i32_type.fn_type(&[i8_ptr.into()], false);
+        self.module.add_function("std_io_feof", feof_type, None);
+
+        // std_io_ferror - 检查错误
+        let ferror_type = i32_type.fn_type(&[i8_ptr.into()], false);
+        self.module.add_function("std_io_ferror", ferror_type, None);
+
+        // ============ 字符串函数 ============
+
+        // std_string_len - 字符串长度
+        let string_len_type = i32_type.fn_type(&[i8_ptr.into()], false);
+        self.module.add_function("std_string_len", string_len_type, None);
+
+        // std_string_copy - 字符串复制
+        let string_copy_type = i8_ptr.fn_type(&[i8_ptr.into()], false);
+        self.module.add_function("std_string_copy", string_copy_type, None);
+
+        // std_string_compare - 字符串比较
+        let string_cmp_type = i32_type.fn_type(&[i8_ptr.into(), i8_ptr.into()], false);
+        self.module.add_function("std_string_compare", string_cmp_type, None);
+
+        // std_string_concat - 字符串拼接
+        let string_concat_type = i8_ptr.fn_type(&[i8_ptr.into(), i8_ptr.into()], false);
+        self.module.add_function("std_string_concat", string_concat_type, None);
+
+        // std_string_to_i32 - 字符串转整数
+        let string_to_i32_type = i32_type.fn_type(&[i8_ptr.into()], false);
+        self.module.add_function("std_string_to_i32", string_to_i32_type, None);
+
+        // std_string_from_i32 - 整数转字符串
+        let string_from_i32_type = i8_ptr.fn_type(&[i32_type.into()], false);
+        self.module.add_function("std_string_from_i32", string_from_i32_type, None);
+
+        // ============ 内存管理函数 ============
+
+        // std_memory_alloc - 分配内存
+        let mem_alloc_type = i8_ptr.fn_type(&[i64_type.into()], false);
+        self.module.add_function("std_memory_alloc", mem_alloc_type, None);
+
+        // std_memory_free - 释放内存
+        let mem_free_type = self.context.void_type().fn_type(&[i8_ptr.into()], false);
+        self.module.add_function("std_memory_free", mem_free_type, None);
+
+        // std_memory_realloc - 重新分配内存
+        let mem_realloc_type = i8_ptr.fn_type(&[i8_ptr.into(), i64_type.into()], false);
+        self.module.add_function("std_memory_realloc", mem_realloc_type, None);
+
+        // std_memory_copy - 内存复制
+        let mem_copy_type = i8_ptr.fn_type(&[i8_ptr.into(), i8_ptr.into(), i64_type.into()], false);
+        self.module.add_function("std_memory_copy", mem_copy_type, None);
+
+        // std_memory_move - 内存移动
+        let mem_move_type = i8_ptr.fn_type(&[i8_ptr.into(), i8_ptr.into(), i64_type.into()], false);
+        self.module.add_function("std_memory_move", mem_move_type, None);
+
+        // std_memory_set - 内存设置
+        let mem_set_type =
+            i8_ptr.fn_type(&[i8_ptr.into(), i32_type.into(), i64_type.into()], false);
+        self.module.add_function("std_memory_set", mem_set_type, None);
+
+        // std_memory_compare - 内存比较
+        let mem_cmp_type =
+            i32_type.fn_type(&[i8_ptr.into(), i8_ptr.into(), i64_type.into()], false);
+        self.module.add_function("std_memory_compare", mem_cmp_type, None);
+
+        // ============ 数学函数 ============
+
+        // std_math_abs - 绝对值
+        let math_abs_type = i32_type.fn_type(&[i32_type.into()], false);
+        self.module.add_function("std_math_abs", math_abs_type, None);
+
+        // std_math_max - 最大值
+        let math_max_type = i32_type.fn_type(&[i32_type.into(), i32_type.into()], false);
+        self.module.add_function("std_math_max", math_max_type, None);
+
+        // std_math_min - 最小值
+        let math_min_type = i32_type.fn_type(&[i32_type.into(), i32_type.into()], false);
+        self.module.add_function("std_math_min", math_min_type, None);
+
+        // pow - 幂运算
+        let f64_type = self.context.f64_type();
+        let pow_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
+        self.module.add_function("pow", pow_type, None);
+
+        // std_math_pow - 幂运算
+        let math_pow_type = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
+        self.module.add_function("std_math_pow", math_pow_type, None);
+
+        // std_math_sqrt - 平方根
+        let math_sqrt_type = f64_type.fn_type(&[f64_type.into()], false);
+        self.module.add_function("std_math_sqrt", math_sqrt_type, None);
     }
 }
 
@@ -216,13 +359,19 @@ impl<'ctx> CodeGenerator<'ctx> {
             self.generate_struct_definition(struct_def)?;
         }
 
-        // 生成函数声明
+        // 生成函数声明 (包括方法)
         for func in &program.functions {
             self.generate_function_declaration(func)?;
         }
+        for func in &program.methods {
+            self.generate_function_declaration(func)?;
+        }
 
-        // 生成函数体
+        // 生成函数体 (包括方法)
         for func in &program.functions {
+            self.generate_function(func)?;
+        }
+        for func in &program.methods {
             self.generate_function(func)?;
         }
 
@@ -301,6 +450,11 @@ impl<'ctx> CodeGenerator<'ctx> {
         struct_type.set_body(&field_types, false);
 
         self.struct_types.insert(struct_def.name.clone(), struct_type);
+
+        // 存储字段列表
+        let field_names: Vec<String> = struct_def.fields.iter().map(|f| f.name.clone()).collect();
+        self.struct_field_lists.insert(struct_def.name.clone(), field_names);
+
         Ok(())
     }
 
@@ -389,6 +543,8 @@ impl<'ctx> CodeGenerator<'ctx> {
                 }) = initializer
                 {
                     Some(struct_name.clone())
+                } else if let Some(Expression::New { type_name: struct_name, .. }) = initializer {
+                    Some(struct_name.clone())
                 } else {
                     None
                 };
@@ -414,14 +570,36 @@ impl<'ctx> CodeGenerator<'ctx> {
                     }
 
                     self.add_variable(name.clone(), alloca);
-                    // 保存结构体类型信息
-                    self.set_variable_type(name, struct_type.into());
+                    // 保存结构体类型信息（应该是指针类型）
+                    let ptr_type = self.context.ptr_type(AddressSpace::default());
+                    self.set_variable_type(name, ptr_type.into());
                 } else {
-                    // 确定类型
-                    let ty = type_annotation
+                    // 检查是否有类型注解
+                    let has_string_type = type_annotation
                         .as_ref()
-                        .map(|t| self.map_type(t))
-                        .unwrap_or_else(|| self.context.i32_type().into());
+                        .map(|t| matches!(t, Type::String))
+                        .unwrap_or(false);
+
+                    // 检查初始化表达式是否是函数调用返回字符串（readln()）
+                    let is_string_init = matches!(initializer, Some(Expression::Call { callee, .. }) if {
+                        if let Expression::Identifier(name, _) = callee.as_ref() {
+                            name == "readln"
+                        } else {
+                            false
+                        }
+                    });
+
+                    // 如果有字符串类型注解或调用 readln()，使用指针类型
+                    let ty = if has_string_type || is_string_init {
+                        // 字符串类型使用指针
+                        self.context.ptr_type(AddressSpace::default()).into()
+                    } else {
+                        // 确定类型
+                        type_annotation
+                            .as_ref()
+                            .map(|t| self.map_type(t))
+                            .unwrap_or_else(|| self.context.i32_type().into())
+                    };
 
                     // 创建局部变量
                     let alloca = self.builder().build_alloca(ty, name)?;
@@ -440,16 +618,55 @@ impl<'ctx> CodeGenerator<'ctx> {
                 }
             },
             Statement::Assignment { target, value, span: _ } => {
-                if let Expression::Identifier(name, _) = target {
-                    if let Some(ptr) = self.get_variable(name) {
+                // 处理各种赋值目标: identifier = expr 或 obj.field = expr
+                match target {
+                    Expression::Identifier(name, _) => {
+                        // 简单变量赋值: x = value
+                        if let Some(ptr) = self.get_variable(name) {
+                            let value = self.generate_expression(value)?;
+                            self.builder().build_store(ptr, value)?;
+                        } else {
+                            return Err(CodegenError {
+                                message: format!("Variable {} not found", name),
+                            });
+                        }
+                    },
+                    Expression::Member { object, member, span: _ } => {
+                        // 成员赋值: obj.field = value
                         let value = self.generate_expression(value)?;
-                        let basic_value = value;
-                        self.builder().build_store(ptr, basic_value)?;
-                    } else {
-                        return Err(CodegenError {
-                            message: format!("Variable {} not found", name),
-                        });
-                    }
+
+                        if let Expression::Identifier(var_name, _) = object.as_ref() {
+                            if let Some(ptr) = self.get_variable(var_name) {
+                                // 动态获取字段索引
+                                let field_index = self.get_field_index(var_name, member);
+                                let idx = field_index.unwrap_or(0) as u64;
+
+                                let i32_type = self.context.i32_type();
+                                let zero = i32_type.const_int(0, false);
+                                let field_idx = i32_type.const_int(idx, false);
+
+                                // 查找 struct 类型
+                                let struct_type = self.find_struct_type_from_variable(var_name);
+
+                                if let Some(struct_type) = struct_type {
+                                    // 使用 struct 类型进行 GEP
+                                    let field_ptr = unsafe {
+                                        self.builder().build_in_bounds_gep(
+                                            struct_type,
+                                            ptr,
+                                            &[zero, field_idx],
+                                            member.as_str(),
+                                        )?
+                                    };
+
+                                    self.builder().build_store(field_ptr, value)?;
+                                }
+                            }
+                        }
+                    },
+                    _ => {
+                        // 其他类型的赋值目标暂不支持
+                    },
                 }
             },
             Statement::If { condition, then_branch, else_branch, span: _ } => {
@@ -572,6 +789,52 @@ impl<'ctx> CodeGenerator<'ctx> {
             },
             Statement::Break(_span) => {},
             Statement::Continue(_span) => {},
+            Statement::DoWhile { condition, body, span: _ } => {
+                // do-while 循环
+                let function = self.current_function.unwrap();
+                let body_block = self.context.append_basic_block(function, "do_while_body");
+                let cond_block = self.context.append_basic_block(function, "do_while_cond");
+                let end_block = self.context.append_basic_block(function, "do_while_end");
+
+                // 跳转到循环体
+                self.builder().build_unconditional_branch(body_block)?;
+
+                // 生成循环体
+                self.builder().position_at_end(body_block);
+                self.generate_statement(body)?;
+                self.builder().build_unconditional_branch(cond_block)?;
+
+                // 生成条件
+                self.builder().position_at_end(cond_block);
+                let cond_value = self.generate_expression(condition)?;
+                let i32_type = self.context.i32_type();
+                let zero = i32_type.const_int(0, false);
+                let cond_int = self.builder().build_int_compare(
+                    inkwell::IntPredicate::NE,
+                    cond_value.into_int_value(),
+                    zero,
+                    "cond",
+                )?;
+                self.builder().build_conditional_branch(cond_int, body_block, end_block)?;
+
+                // 结束块
+                self.builder().position_at_end(end_block);
+            },
+            Statement::Throw { value, span: _ } => {
+                // throw 语句 - 目前忽略
+                let _ = value;
+            },
+            Statement::TryCatchFinally {
+                try_body,
+                catch_var,
+                catch_body,
+                finally_body,
+                span: _,
+            } => {
+                // try-catch-finally - 目前只执行 try 部分
+                let _ = (catch_var, catch_body, finally_body);
+                self.generate_statement(try_body)?;
+            },
             Statement::ExpressionStatement(expr) => {
                 self.generate_expression(expr)?;
             },
@@ -726,13 +989,167 @@ impl<'ctx> CodeGenerator<'ctx> {
                     Err(CodegenError { message: format!("Variable {} not found", name) })
                 }
             },
+            Expression::This(_span) => {
+                // this 关键字在方法中代表当前实例的指针
+                // 目前返回空指针，后续需要实现方法中的 this 绑定
+                let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+                Ok(i8_ptr_type.const_null().into())
+            },
+            Expression::Typeof { operand, span: _ } => {
+                // typeof 操作符 - 目前返回字符串 "number"
+                let _ = operand;
+                let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+                Ok(i8_ptr_type.const_null().into())
+            },
+            Expression::Instanceof { left, right, span: _ } => {
+                // instanceof 操作符 - 目前返回 false
+                let _ = (left, right);
+                let i32_type = self.context.i32_type();
+                Ok(i32_type.const_int(0, false).into())
+            },
+            Expression::In { left, right, span: _ } => {
+                // in 操作符 - 目前返回 false
+                let _ = (left, right);
+                let i32_type = self.context.i32_type();
+                Ok(i32_type.const_int(0, false).into())
+            },
+            Expression::Delete { operand, span: _ } => {
+                // delete 操作符 - 目前返回 true
+                let _ = operand;
+                let i32_type = self.context.i32_type();
+                Ok(i32_type.const_int(1, false).into())
+            },
+            Expression::NullishCoalescing { left, right: _, span: _ } => {
+                // ?? 操作符 - 目前返回左操作数
+                self.generate_expression(left)
+            },
+            Expression::OptionalChain { base, chains, span: _ } => {
+                // 可选链 - 目前返回基础表达式的值
+                let _ = chains;
+                self.generate_expression(base)
+            },
             Expression::Binary { op, left, right, span: _ } => {
                 let lhs = self.generate_expression(left)?;
                 let rhs = self.generate_expression(right)?;
 
                 let result = match op {
                     BinaryOp::Add => {
-                        if lhs.is_int_value() {
+                        // 检查是否是字符串拼接（指针类型）
+                        if lhs.is_pointer_value() {
+                            // 字符串拼接 - 委托给 Concat 处理
+                            let _ = left;
+                            let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+
+                            let lhs_ptr = lhs.into_pointer_value();
+                            let rhs_ptr = if rhs.is_pointer_value() {
+                                rhs.into_pointer_value()
+                            } else if rhs.is_int_value() {
+                                self.builder().build_int_to_ptr(
+                                    rhs.into_int_value(),
+                                    i8_ptr_type,
+                                    "rhs_ptr",
+                                )?
+                            } else {
+                                return Err(CodegenError {
+                                    message: "Cannot concat non-pointer value".to_string(),
+                                });
+                            };
+
+                            // 获取字符串长度
+                            let strlen_fn =
+                                self.module.get_function("strlen").ok_or_else(|| CodegenError {
+                                    message: "strlen function not found".to_string(),
+                                })?;
+
+                            let lhs_len_call = self.builder().build_call(
+                                strlen_fn,
+                                &[lhs_ptr.as_basic_value_enum().into()],
+                                "strlen_lhs",
+                            )?;
+                            let lhs_len =
+                                lhs_len_call.try_as_basic_value().unwrap_basic().into_int_value();
+
+                            let rhs_len_call = self.builder().build_call(
+                                strlen_fn,
+                                &[rhs_ptr.as_basic_value_enum().into()],
+                                "strlen_rhs",
+                            )?;
+                            let rhs_len =
+                                rhs_len_call.try_as_basic_value().unwrap_basic().into_int_value();
+
+                            // 计算总长度
+                            let i32_type = self.context.i32_type();
+                            let lhs_len_i32 = self.builder().build_int_z_extend(
+                                lhs_len,
+                                i32_type,
+                                "lhs_len_i32",
+                            )?;
+                            let rhs_len_i32 = self.builder().build_int_z_extend(
+                                rhs_len,
+                                i32_type,
+                                "rhs_len_i32",
+                            )?;
+                            let one = i32_type.const_int(1, false);
+                            let total_len_1 = self.builder().build_int_add(
+                                lhs_len_i32,
+                                rhs_len_i32,
+                                "len_sum",
+                            )?;
+                            let total_len_i32 =
+                                self.builder().build_int_add(total_len_1, one, "total_len")?;
+                            // 扩展到 i64 用于 malloc
+                            let i64_type = self.context.i64_type();
+                            let total_len = self.builder().build_int_z_extend(
+                                total_len_i32,
+                                i64_type,
+                                "total_len_i64",
+                            )?;
+
+                            // 分配内存
+                            let malloc_fn =
+                                self.module.get_function("malloc").ok_or_else(|| CodegenError {
+                                    message: "malloc function not found".to_string(),
+                                })?;
+                            let malloc_call = self.builder().build_call(
+                                malloc_fn,
+                                &[total_len.as_basic_value_enum().into()],
+                                "malloc_result",
+                            )?;
+                            let allocated_ptr = malloc_call
+                                .try_as_basic_value()
+                                .unwrap_basic()
+                                .into_pointer_value();
+
+                            // 复制字符串
+                            let strcpy_fn =
+                                self.module.get_function("strcpy").ok_or_else(|| CodegenError {
+                                    message: "strcpy function not found".to_string(),
+                                })?;
+                            self.builder().build_call(
+                                strcpy_fn,
+                                &[
+                                    allocated_ptr.as_basic_value_enum().into(),
+                                    lhs_ptr.as_basic_value_enum().into(),
+                                ],
+                                "strcpy_result",
+                            )?;
+
+                            // 连接字符串
+                            let strcat_fn =
+                                self.module.get_function("strcat").ok_or_else(|| CodegenError {
+                                    message: "strcat function not found".to_string(),
+                                })?;
+                            self.builder().build_call(
+                                strcat_fn,
+                                &[
+                                    allocated_ptr.as_basic_value_enum().into(),
+                                    rhs_ptr.as_basic_value_enum().into(),
+                                ],
+                                "strcat_result",
+                            )?;
+
+                            allocated_ptr.into()
+                        } else if lhs.is_int_value() {
                             self.builder()
                                 .build_int_add(lhs.into_int_value(), rhs.into_int_value(), "add")?
                                 .into()
@@ -1025,8 +1442,15 @@ impl<'ctx> CodeGenerator<'ctx> {
                         let one = i32_type.const_int(1, false);
                         let total_len_1 =
                             self.builder().build_int_add(lhs_len_i32, rhs_len_i32, "len_sum")?;
-                        let total_len =
+                        let total_len_i32 =
                             self.builder().build_int_add(total_len_1, one, "total_len")?;
+                        // 扩展到 i64 用于 malloc
+                        let i64_type = self.context.i64_type();
+                        let total_len = self.builder().build_int_z_extend(
+                            total_len_i32,
+                            i64_type,
+                            "total_len_i64",
+                        )?;
 
                         // 分配内存
                         let malloc_fn = self.module.get_function("malloc").ok_or_else(|| {
@@ -1118,6 +1542,19 @@ impl<'ctx> CodeGenerator<'ctx> {
                             })
                         }
                     },
+                    UnaryOp::Typeof => {
+                        // typeof 操作符 - 返回类型名字符串
+                        // 目前简化处理，返回 "number"
+                        let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+                        let result_ptr = i8_ptr_type.const_null();
+                        Ok(result_ptr.into())
+                    },
+                    UnaryOp::Delete => {
+                        // delete 操作符 - 目前不支持，返回 null
+                        let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+                        let result_ptr = i8_ptr_type.const_null();
+                        Ok(result_ptr.into())
+                    },
                     UnaryOp::AddressOf => {
                         // 取地址 &x
                         // 需要特殊处理：因为 generate_expression 会返回加载后的值
@@ -1161,22 +1598,69 @@ impl<'ctx> CodeGenerator<'ctx> {
             },
             Expression::Call { callee, arguments, span: _ } => {
                 // 处理成员调用 (io.println, obj.method 等)
-                let callee_name = match callee.as_ref() {
+                let (callee_name, is_method_call, object_ptr) = match callee.as_ref() {
                     Expression::Identifier(name, _) => {
                         // 直接函数调用
-                        name.clone()
+                        (name.clone(), false, None)
                     },
                     Expression::Member { object, member, .. } => {
-                        // 成员调用 (io.println)
+                        // 成员调用 (io.println 或 obj.method)
                         // 检查对象是否是标识符
                         if let Expression::Identifier(ns, _) = object.as_ref() {
                             // 命名空间调用 (io.println -> std_io_println)
-                            format!("{}_{}", ns, member)
+                            (format!("{}_{}", ns, member), false, None)
                         } else {
-                            // 对象的成员方法调用
-                            return Err(CodegenError {
-                                message: "Object method calls not supported yet".to_string(),
-                            });
+                            // 对象的成员方法调用 (p.getX())
+                            // 先获取对象的指针
+                            let obj_expr = object.as_ref();
+                            if let Expression::Identifier(var_name, _) = obj_expr {
+                                // 获取变量的指针
+                                if let Some(ptr) = self.get_variable(var_name) {
+                                    // 获取变量的类型，根据类型生成正确的方法名
+                                    let method_name = if let Some(struct_type) =
+                                        self.find_struct_type_from_variable(var_name)
+                                    {
+                                        // 从结构体类型获取名称
+                                        if let Some(type_name) = struct_type.get_name() {
+                                            format!(
+                                                "{}_{}",
+                                                type_name.to_str().unwrap_or(""),
+                                                member
+                                            )
+                                        } else {
+                                            // 如果没有类型名，尝试从变量名推断类名（首字母大写）
+                                            let class_name: String = var_name
+                                                .chars()
+                                                .next()
+                                                .map(|c| c.to_uppercase().collect())
+                                                .unwrap_or_default();
+                                            format!("{}_{}", class_name, member)
+                                        }
+                                    } else {
+                                        // 如果没有找到结构体类型，尝试从变量名推断类名（首字母大写）
+                                        let class_name: String = var_name
+                                            .chars()
+                                            .next()
+                                            .map(|c| c.to_uppercase().collect())
+                                            .unwrap_or_default();
+                                        format!("{}_{}", class_name, member)
+                                    };
+                                    // 返回方法名和对象指针
+                                    (method_name, true, Some((var_name.clone(), ptr)))
+                                } else {
+                                    return Err(CodegenError {
+                                        message: format!(
+                                            "Variable {} not found for method call",
+                                            var_name
+                                        ),
+                                    });
+                                }
+                            } else {
+                                return Err(CodegenError {
+                                    message: "Object method calls only supported on identifiers"
+                                        .to_string(),
+                                });
+                            }
                         }
                     },
                     _ => {
@@ -1186,12 +1670,14 @@ impl<'ctx> CodeGenerator<'ctx> {
                     },
                 };
 
+                let callee_name = callee_name.clone();
+
                 // 处理内置函数 (包括命名空间形式的调用如 io.println)
                 if callee_name == "println"
                     || callee_name == "console.log"
+                    || callee_name == "console_log"
                     || callee_name.starts_with("io_")
                 {
-                    // 简化处理: println/console.log 只支持一个字符串参数
                     let puts_fn = self.module.get_function("puts").ok_or_else(|| CodegenError {
                         message: "puts function not found".to_string(),
                     })?;
@@ -1212,33 +1698,63 @@ impl<'ctx> CodeGenerator<'ctx> {
                         let arg = &arguments[0];
                         let arg_value = self.generate_expression(arg)?;
 
-                        // 转换为 i8* 指针
-                        let ptr =
-                            self.builder().build_bit_cast(arg_value, i8_ptr_type, "arg_ptr")?;
-                        self.builder().build_call(puts_fn, &[ptr.into()], "puts_call")?;
+                        // 根据参数类型选择合适的函数
+                        if arg_value.is_int_value() {
+                            // 如果是整数，调用 println_i32
+                            let println_i32_fn = self
+                                .module
+                                .get_function("std_io_println_i32")
+                                .ok_or_else(|| CodegenError {
+                                    message: "std_io_println_i32 function not found".to_string(),
+                                })?;
+                            self.builder().build_call(
+                                println_i32_fn,
+                                &[arg_value.into()],
+                                "println_i32_call",
+                            )?;
+                        } else {
+                            // 如果不是整数（字符串），调用 puts
+                            let ptr =
+                                self.builder().build_bit_cast(arg_value, i8_ptr_type, "arg_ptr")?;
+                            self.builder().build_call(puts_fn, &[ptr.into()], "puts_call")?;
 
-                        // 添加换行
-                        let newline_str = self.context.const_string(b"\n\0", true);
-                        let newline_global =
-                            self.module.add_global(newline_str.get_type(), None, "newline_str");
-                        newline_global.set_initializer(&newline_str);
-                        let newline_ptr = self.builder().build_bit_cast(
-                            newline_global,
-                            i8_ptr_type,
-                            "newline_ptr",
-                        )?;
-                        self.builder().build_call(
-                            puts_fn,
-                            &[newline_ptr.into()],
-                            "puts_newline",
-                        )?;
+                            // 添加换行
+                            let newline_str = self.context.const_string(b"\n\0", true);
+                            let newline_global =
+                                self.module.add_global(newline_str.get_type(), None, "newline_str");
+                            newline_global.set_initializer(&newline_str);
+                            let newline_ptr = self.builder().build_bit_cast(
+                                newline_global,
+                                i8_ptr_type,
+                                "newline_ptr",
+                            )?;
+                            self.builder().build_call(
+                                puts_fn,
+                                &[newline_ptr.into()],
+                                "puts_newline",
+                            )?;
+                        }
                     }
 
                     return Ok(self.context.i32_type().const_int(0, false).into());
                 }
 
                 // 处理 readln 函数
-                if callee_name == "readln" || callee_name == "readln_i32" {
+                if callee_name == "readln" {
+                    // 调用 std_io_readln 运行时函数
+                    let readln_fn = self.module.get_function("std_io_readln").ok_or_else(|| {
+                        CodegenError { message: "std_io_readln function not found".to_string() }
+                    })?;
+
+                    let call_result = self.builder().build_call(readln_fn, &[], "readln_call")?;
+
+                    // 返回字符串指针
+                    let result = call_result.try_as_basic_value().unwrap_basic();
+                    return Ok(result);
+                }
+
+                // 处理 readln_i32 函数（读取整数）
+                if callee_name == "readln_i32" {
                     let i32_type = self.context.i32_type();
                     let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
 
@@ -1268,15 +1784,34 @@ impl<'ctx> CodeGenerator<'ctx> {
                     return Ok(result);
                 }
 
-                let fn_value = self.module.get_function(&callee_name).ok_or_else(|| {
-                    CodegenError { message: format!("Function {} not found", callee_name) }
-                })?;
-
+                // 对于方法调用，需要获取变量的类型信息
                 let mut args_values: Vec<inkwell::values::BasicMetadataValueEnum> = Vec::new();
+
+                // 如果是方法调用，获取对象指针并作为第一个参数
+                if is_method_call {
+                    if let Some((var_name, ptr)) = object_ptr {
+                        // 获取变量的类型
+                        if let Some(var_type) = self.get_variable_type(&var_name) {
+                            // 加载对象指针
+                            let obj_value = self.builder().build_load(var_type, ptr, &var_name)?;
+                            args_values.push(obj_value.into());
+                        } else {
+                            // 如果没有类型信息，直接使用指针
+                            let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+                            let null_ptr = i8_ptr_type.const_null();
+                            args_values.push(null_ptr.into());
+                        }
+                    }
+                }
+
                 for arg in arguments {
                     let arg_val = self.generate_expression(arg)?;
                     args_values.push(arg_val.into());
                 }
+
+                let fn_value = self.module.get_function(&callee_name).ok_or_else(|| {
+                    CodegenError { message: format!("Function {} not found", callee_name) }
+                })?;
 
                 let call_result = self.builder().build_call(fn_value, &args_values, "call")?;
 
@@ -1292,6 +1827,29 @@ impl<'ctx> CodeGenerator<'ctx> {
                 }
                 // 默认返回 0
                 Ok(i32_type.const_int(0, false).into())
+            },
+            Expression::New { type_name, args, span: _ } => {
+                // new TypeName(args) - 分配并初始化对象
+                // 目前简化处理：分配 struct 空间并调用构造函数
+
+                // 查找 struct 类型
+                let struct_type = self.find_struct_type_from_variable(type_name);
+
+                if let Some(struct_type) = struct_type {
+                    // 分配 struct 空间
+                    let ptr = self.builder().build_malloc(struct_type, type_name)?;
+
+                    // 如果有参数，尝试调用构造函数 (目前忽略参数)
+                    // TODO: 实现构造函数调用
+                    let _ = args;
+
+                    Ok(ptr.as_basic_value_enum())
+                } else {
+                    // 如果找不到类型，返回空指针
+                    let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+                    let null_ptr = i8_ptr_type.const_null();
+                    Ok(null_ptr.into())
+                }
             },
             Expression::Index { array, index, span: _ } => {
                 // 生成数组和索引值
@@ -1347,28 +1905,40 @@ impl<'ctx> CodeGenerator<'ctx> {
                 Ok(loaded)
             },
             Expression::Member { object, member, span: _ } => {
+                // 检查是否是 .length 属性访问（数组长度）
+                if member == "length" {
+                    // 数组长度访问 - 需要返回数组的长度
+                    // 这里简化处理，返回一个固定值或者通过函数调用获取
+                    let obj_value = self.generate_expression(object)?;
+                    if obj_value.is_pointer_value() {
+                        // 对于指针类型的数组，调用 strlen 获取长度
+                        let strlen_fn = self.module.get_function("strlen").ok_or_else(|| {
+                            CodegenError { message: "strlen function not found".to_string() }
+                        })?;
+                        let result = self.builder().build_call(
+                            strlen_fn,
+                            &[obj_value.into_pointer_value().as_basic_value_enum().into()],
+                            "array_len",
+                        )?;
+                        return Ok(result.try_as_basic_value().unwrap_basic());
+                    }
+                    // 如果不是指针，返回 0
+                    let i32_type = self.context.i32_type();
+                    return Ok(i32_type.const_int(0, false).into());
+                }
+
                 // 检查对象是否是标识符
                 if let Expression::Identifier(var_name, _) = object.as_ref() {
                     // 如果是标识符，获取变量的指针
                     if let Some(ptr) = self.get_variable(var_name) {
-                        // 获取变量类型
-                        let _var_type_opt = self.get_variable_type(var_name);
+                        // 动态获取字段索引
+                        let field_index = self.get_field_index(var_name, member);
+                        let idx = field_index.unwrap_or(0) as u64;
 
                         // 预先创建索引常量
                         let i32_type = self.context.i32_type();
                         let zero = i32_type.const_int(0, false);
-
-                        // 根据变量类型确定字段索引和类型
-                        let field_index = match member.as_str() {
-                            "x" => 0,
-                            "y" => 1,
-                            "z" => 2,
-                            _ => 0,
-                        };
-                        let idx = i32_type.const_int(field_index as u64, false);
-
-                        // 尝试获取 struct 类型（目前未使用，保留用于未来实现）
-                        let _struct_type_opt: Option<inkwell::types::StructType<'ctx>> = None;
+                        let field_idx = i32_type.const_int(idx, false);
 
                         // 查找 struct 类型
                         let struct_type = self.find_struct_type_from_variable(var_name);
@@ -1379,14 +1949,14 @@ impl<'ctx> CodeGenerator<'ctx> {
                                 self.builder().build_in_bounds_gep(
                                     struct_type,
                                     ptr,
-                                    &[zero, idx],
+                                    &[zero, field_idx],
                                     member,
                                 )?
                             };
 
                             // 获取字段的实际类型并加载
                             let field_types = struct_type.get_field_types();
-                            let field_llvm_type = field_types[field_index];
+                            let field_llvm_type = field_types[field_index.unwrap_or(0) as usize];
                             let field_value =
                                 self.builder().build_load(field_llvm_type, field_ptr, member)?;
                             return Ok(field_value);
@@ -1397,7 +1967,7 @@ impl<'ctx> CodeGenerator<'ctx> {
                             self.builder().build_in_bounds_gep(
                                 i32_type,
                                 ptr,
-                                &[zero, idx],
+                                &[zero, field_idx],
                                 member,
                             )?
                         };
@@ -1472,13 +2042,50 @@ impl<'ctx> CodeGenerator<'ctx> {
                 }
             },
             Expression::Assignment { target, value, span: _ } => {
-                // 简化处理：支持 identifier = expr 形式的赋值
+                // 支持 identifier = expr 和 obj.field = expr 形式的赋值
                 let value = self.generate_expression(value)?;
-                if let Expression::Identifier(name, _) = target.as_ref() {
-                    if let Some(ptr) = self.get_variable(name) {
-                        self.builder().build_store(ptr, value)?;
-                    }
+
+                match target.as_ref() {
+                    Expression::Identifier(name, _) => {
+                        // 简单变量赋值: x = value
+                        if let Some(ptr) = self.get_variable(name) {
+                            self.builder().build_store(ptr, value)?;
+                        }
+                    },
+                    Expression::Member { object, member, span: _ } => {
+                        // 成员赋值: obj.field = value
+                        if let Expression::Identifier(var_name, _) = object.as_ref() {
+                            if let Some(ptr) = self.get_variable(var_name) {
+                                // 动态获取字段索引
+                                let field_index = self.get_field_index(var_name, member);
+                                let idx = field_index.unwrap_or(0) as u64;
+
+                                let i32_type = self.context.i32_type();
+                                let zero = i32_type.const_int(0, false);
+                                let field_idx = i32_type.const_int(idx, false);
+
+                                // 查找 struct 类型
+                                let struct_type = self.find_struct_type_from_variable(var_name);
+
+                                if let Some(struct_type) = struct_type {
+                                    // 使用 struct 类型进行 GEP
+                                    let field_ptr = unsafe {
+                                        self.builder().build_in_bounds_gep(
+                                            struct_type,
+                                            ptr,
+                                            &[zero, field_idx],
+                                            member.as_str(),
+                                        )?
+                                    };
+
+                                    self.builder().build_store(field_ptr, value)?;
+                                }
+                            }
+                        }
+                    },
+                    _ => {},
                 }
+
                 Ok(value)
             },
             Expression::FunctionExpression { .. } => {
@@ -1613,12 +2220,52 @@ impl<'ctx> CodeGenerator<'ctx> {
     ) -> Option<inkwell::types::StructType<'ctx>> {
         // 检查变量类型映射
         if let Some(var_type) = self.variable_types.get(var_name) {
+            // 处理指针类型（通过指针查找指向的结构体类型）
+            if var_type.is_pointer_type() {
+                // 尝试从指针获取结构体类型
+                // 由于指针可能被转换为 i8*，我们需要另一种方法
+            }
             if var_type.is_struct_type() {
                 let struct_type = var_type.into_struct_type();
                 // 尝试在 struct_types 中查找匹配的类型
                 for st in self.struct_types.values() {
                     if *st == struct_type {
                         return Some(*st);
+                    }
+                }
+            }
+        }
+
+        // 尝试从 struct_fields 推断类型名
+        if let Some(_fields) = self.struct_field_lists.get(var_name) {
+            // 使用变量名作为类型名的基础（首字母大写）
+            let type_name: String =
+                var_name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+            if let Some(struct_type) = self.struct_types.get(&type_name) {
+                return Some(*struct_type);
+            }
+        }
+
+        None
+    }
+
+    /// 根据变量名和字段名获取字段索引
+    fn get_field_index(&self, var_name: &str, field_name: &str) -> Option<u32> {
+        // 首先根据变量类型查找 struct 名称
+        if let Some(var_type) = self.variable_types.get(var_name) {
+            if var_type.is_struct_type() {
+                let struct_type = var_type.into_struct_type();
+                // 在 struct_types 中查找匹配的 struct
+                for (name, st) in &self.struct_types {
+                    if *st == struct_type {
+                        // 从字段列表中查找字段索引
+                        if let Some(fields) = self.struct_field_lists.get(name) {
+                            for (i, fname) in fields.iter().enumerate() {
+                                if fname == field_name {
+                                    return Some(i as u32);
+                                }
+                            }
+                        }
                     }
                 }
             }
