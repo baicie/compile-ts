@@ -1,19 +1,11 @@
 //! 模块级代码生成
 //!
-//! 声明运行时函数（如 puts）、main，以及全局常量（如字符串）。
+//! 声明运行时函数（如 std.io.println）、main，以及全局常量（如字符串）。
 
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::values::FunctionValue;
-
-/// 声明 C 标准库 `puts(i8*) -> i32`
-#[must_use]
-pub fn declare_puts<'a>(context: &'a Context, module: &'a Module<'a>) -> FunctionValue<'a> {
-    let i8_ptr = context.ptr_type(Default::default());
-    let fn_type = context.i32_type().fn_type(&[i8_ptr.into()], false);
-    module.add_function("puts", fn_type, None)
-}
 
 /// 声明 `main() -> i32`
 #[must_use]

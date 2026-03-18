@@ -39,6 +39,10 @@ pub enum Token {
     Readonly,
     Async,
     Await,
+    Import,
+    Export,
+    From,
+    As,
 
     // 类型 (TypeScript 风格) - 使用 Type 后缀避免与字面量冲突
     NumberType,
@@ -240,6 +244,10 @@ impl<'a> Lexer<'a> {
             "readonly" => Token::Readonly,
             "async" => Token::Async,
             "await" => Token::Await,
+            "import" => Token::Import,
+            "export" => Token::Export,
+            "from" => Token::From,
+            "as" => Token::As,
             // TypeScript 类型
             "number" => Token::NumberType,
             "boolean" => Token::BooleanType,

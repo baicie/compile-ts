@@ -282,6 +282,55 @@ pub enum SwitchPattern {
     Default,
 }
 
+/// 导入声明
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportDeclaration {
+    /// 模块路径 (如 "std/io" 或 "./utils")
+    pub module_path: String,
+    /// 导入的符号列表
+    pub imports: Vec<ImportSpecifier>,
+    /// 别名 (如 import { foo as bar })
+    pub alias: Option<String>,
+    pub span: Span,
+}
+
+/// 导入说明符
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportSpecifier {
+    /// 原始名称
+    pub name: String,
+    /// 别名 (如 foo as bar)
+    pub alias: Option<String>,
+}
+
+/// 导出声明
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExportDeclaration {
+    /// 导出类型
+    pub kind: ExportKind,
+    pub span: Span,
+}
+
+/// 导出类型
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExportKind {
+    /// 导出指定符号
+    Named(Vec<ExportSpecifier>),
+    /// 导出默认值
+    Default(Expression),
+    /// 重新导出 (export * from "module")
+    ReExport(String),
+}
+
+/// 导出说明符
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExportSpecifier {
+    /// 原始名称
+    pub name: String,
+    /// 别名
+    pub alias: Option<String>,
+}
+
 /// 程序
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
@@ -289,6 +338,8 @@ pub struct Program {
     pub structs: Vec<StructDefinition>,
     pub interfaces: Vec<InterfaceDefinition>,
     pub statements: Vec<Statement>,
+    pub imports: Vec<ImportDeclaration>,
+    pub exports: Vec<ExportDeclaration>,
 }
 
 /// 接口定义 (TypeScript 风格)

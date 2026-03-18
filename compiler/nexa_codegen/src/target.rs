@@ -54,6 +54,7 @@ pub fn generate_executable(
 
     let temp_dir = std::env::temp_dir();
     let object_file = temp_dir.join("nexa_temp.o");
+    let runtime_obj = temp_dir.join("nexa_std.o");
 
     target_machine
         .write_to_file(module, FileType::Object, object_file.as_path())
@@ -61,10 +62,46 @@ pub fn generate_executable(
 
     let output_path_buf = Path::new(output_path);
 
-    let link_status =
-        Command::new("clang").arg(&object_file).arg("-o").arg(output_path_buf).status()?;
+    // 获取项目根目录 (target/debug/nexac 的父目录的父目录)
+    let exe_path =
+        std::env::current_exe().map_err(|e| format!("Failed to get current exe: {}", e))?;
+    let exe_dir = exe_path.parent().ok_or("Failed to get exe parent dir")?;
+    let project_root =
+        exe_dir.parent().and_then(|p| p.parent()).ok_or("Failed to get project root")?;
+
+    eprintln!("exe_path: {:?}", exe_path);
+    eprintln!("exe_dir: {:?}", exe_dir);
+    eprintln!("project_root: {:?}", project_root);
+
+    let runtime_c = project_root.join("compiler/nexac/runtime/nexa_std.c");
+
+    // 编译运行时库
+    let runtime_c_str = runtime_c.to_string_lossy().to_string();
+    eprintln!("Compiling runtime from: {}", runtime_c_str);
+
+    let compile_output =
+        Command::new("clang").args(["-c", "-O2", "-o"]).arg(&runtime_obj).arg(&runtime_c).output();
+
+    // 如果编译成功则链接
+    let link_status = if compile_output.as_ref().map(|o| o.status.success()).unwrap_or(false) {
+        eprintln!("Runtime compiled, linking...");
+        Command::new("clang")
+            .arg(&object_file)
+            .arg(&runtime_obj)
+            .arg("-o")
+            .arg(output_path_buf)
+            .status()?
+    } else {
+        // 回退：直接链接（用于调试模式）
+        let err = compile_output
+            .map(|o| String::from_utf8_lossy(&o.stderr).to_string())
+            .unwrap_or_default();
+        eprintln!("Warning: Failed to compile runtime: {}", err);
+        Command::new("clang").arg(&object_file).arg("-o").arg(output_path_buf).status()?
+    };
 
     let _ = std::fs::remove_file(&object_file);
+    let _ = std::fs::remove_file(&runtime_obj);
 
     if link_status.success() {
         Ok(())

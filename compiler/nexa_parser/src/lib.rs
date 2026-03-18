@@ -4,8 +4,10 @@
 
 pub mod ast;
 pub mod lexer;
+pub mod module;
 pub mod parser;
 
 pub use ast::*;
 pub use lexer::{Lexer, Token};
+pub use module::{ExportedSymbol, Module, ModuleError, ModuleLoader, SymbolTable};
 pub use parser::{ParseError, Parser};

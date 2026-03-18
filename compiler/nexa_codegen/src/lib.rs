@@ -6,15 +6,16 @@ mod module;
 mod target;
 mod types;
 
-pub use module::{add_global_string, declare_main, declare_puts};
+pub use module::{add_global_string, declare_main};
 pub use target::{generate_executable, host_target_triple};
 pub use types::TypeMapper;
 
 use inkwell::builder::Builder;
 use inkwell::context::Context;
+use inkwell::module::Linkage;
 use inkwell::module::Module;
 use inkwell::types::{BasicType, BasicTypeEnum};
-use inkwell::values::{BasicValueEnum, FunctionValue, PointerValue};
+use inkwell::values::{BasicValue, BasicValueEnum, FunctionValue, PointerValue};
 use inkwell::AddressSpace;
 use nexa_parser::ast::*;
 use std::collections::HashMap;
@@ -39,6 +40,8 @@ pub struct CodeGenerator<'ctx> {
     type_mapper: TypeMapper<'ctx>,
     /// Struct 类型定义映射
     struct_types: HashMap<String, inkwell::types::StructType<'ctx>>,
+    /// 导入的符号表 (模块路径 -> 符号)
+    imported_symbols: HashMap<String, nexa_parser::module::SymbolTable>,
 }
 
 impl<'ctx> CodeGenerator<'ctx> {
@@ -56,7 +59,25 @@ impl<'ctx> CodeGenerator<'ctx> {
             variable_types: HashMap::new(),
             type_mapper,
             struct_types: HashMap::new(),
+            imported_symbols: HashMap::new(),
         }
+    }
+
+    /// 设置导入的符号表
+    pub fn set_imported_symbols(
+        &mut self,
+        symbols: HashMap<String, nexa_parser::module::SymbolTable>,
+    ) {
+        self.imported_symbols = symbols;
+    }
+
+    /// 添加导入的符号
+    pub fn add_imported_symbols(
+        &mut self,
+        module_path: String,
+        symbols: nexa_parser::module::SymbolTable,
+    ) {
+        self.imported_symbols.insert(module_path, symbols);
     }
 
     /// 获取上下文
@@ -98,6 +119,27 @@ impl<'ctx> CodeGenerator<'ctx> {
     /// 获取局部变量
     pub fn get_variable(&self, name: &str) -> Option<PointerValue<'ctx>> {
         self.variables.get(name).copied()
+    }
+
+    /// 检查是否是导入的符号
+    pub fn is_imported_symbol(&self, name: &str) -> bool {
+        // 检查所有导入的符号表
+        for symbols in self.imported_symbols.values() {
+            if symbols.find(name).is_some() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 获取导入的符号
+    pub fn get_imported_symbol(&self, name: &str) -> Option<nexa_parser::module::ExportedSymbol> {
+        for symbols in self.imported_symbols.values() {
+            if let Some(symbol) = symbols.find(name) {
+                return Some(symbol);
+            }
+        }
+        None
     }
 
     /// 清除局部变量
@@ -164,6 +206,11 @@ impl From<inkwell::builder::BuilderError> for CodegenError {
 impl<'ctx> CodeGenerator<'ctx> {
     /// 生成程序
     pub fn generate_program(&mut self, program: &Program) -> Result<(), CodegenError> {
+        // 处理导入声明
+        for import in &program.imports {
+            self.handle_import(import)?;
+        }
+
         // 生成 struct 定义
         for struct_def in &program.structs {
             self.generate_struct_definition(struct_def)?;
@@ -177,6 +224,66 @@ impl<'ctx> CodeGenerator<'ctx> {
         // 生成函数体
         for func in &program.functions {
             self.generate_function(func)?;
+        }
+
+        // 处理导出声明
+        for export in &program.exports {
+            self.handle_export(export)?;
+        }
+
+        Ok(())
+    }
+
+    /// 处理导入声明
+    fn handle_import(&mut self, import: &ImportDeclaration) -> Result<(), CodegenError> {
+        // 对于标准库导入，声明外部函数
+        // 格式: std.io.println -> 调用 C 运行时函数
+        if import.module_path.starts_with("std.") {
+            let parts: Vec<&str> = import.module_path.split('.').collect();
+            if parts.len() >= 2 {
+                let module = parts[1];
+
+                // 为每个导入的符号创建外部函数声明
+                for spec in &import.imports {
+                    let fn_name = format!("{}_{}", module, spec.name);
+                    let i8_ptr = self.context.ptr_type(AddressSpace::default());
+                    let i32_type = self.context.i32_type();
+                    let fn_type = i32_type.fn_type(&[i8_ptr.into()], false);
+
+                    // 检查函数是否已存在
+                    if self.module.get_function(&fn_name).is_none() {
+                        self.module.add_function(&fn_name, fn_type, None);
+                    }
+                }
+
+                // 处理命名空间导入 (import * as ns from "std/io")
+                if let Some(_alias) = &import.alias {
+                    // 命名空间导入暂不处理
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// 处理导出声明
+    fn handle_export(&mut self, export: &ExportDeclaration) -> Result<(), CodegenError> {
+        match &export.kind {
+            ExportKind::Named(specifiers) => {
+                for spec in specifiers {
+                    // 尝试获取函数并设置其链接age
+                    if let Some(fn_value) = self.module.get_function(&spec.name) {
+                        // 设置函数为外部链接，以便在其他模块中可见
+                        fn_value.set_linkage(Linkage::External);
+                    }
+                }
+            },
+            ExportKind::Default(_expr) => {
+                // export default 表达式 - 暂不处理
+            },
+            ExportKind::ReExport(_module_path) => {
+                // export * from "module" - 暂不处理
+            },
         }
 
         Ok(())
@@ -583,6 +690,38 @@ impl<'ctx> CodeGenerator<'ctx> {
                         let value = self.builder().build_load(i32_type, ptr, name)?;
                         Ok(value)
                     }
+                } else if let Some(symbol) = self.get_imported_symbol(name) {
+                    // 处理导入的符号
+                    match symbol {
+                        nexa_parser::module::ExportedSymbol::Variable(_, _) => {
+                            // 对于导入的变量，返回常量值
+                            // 目前返回 0，后续可以从模块信息中获取实际值
+                            let i32_type = self.context.i32_type();
+                            Ok(i32_type.const_int(0, false).into())
+                        },
+                        nexa_parser::module::ExportedSymbol::Function(func) => {
+                            // 对于导入的函数，需要先声明函数
+                            self.declare_imported_function(&func)?;
+                            // 然后获取函数 - 返回函数指针
+                            if let Some(fn_value) = self.module.get_function(&func.name) {
+                                // 将函数转换为指针返回
+                                let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+                                let fn_ptr = self.builder().build_bit_cast(
+                                    fn_value.as_global_value().as_pointer_value(),
+                                    i8_ptr_type,
+                                    "fn_ptr",
+                                )?;
+                                Ok(fn_ptr)
+                            } else {
+                                Err(CodegenError {
+                                    message: format!("Imported function {} not found", name),
+                                })
+                            }
+                        },
+                        _ => Err(CodegenError {
+                            message: format!("Unsupported imported symbol type for {}", name),
+                        }),
+                    }
                 } else {
                     Err(CodegenError { message: format!("Variable {} not found", name) })
                 }
@@ -801,7 +940,9 @@ impl<'ctx> CodeGenerator<'ctx> {
                             zero,
                             "rhs_nz",
                         )?;
-                        self.builder().build_and(lhs_nonzero, rhs_nonzero, "and")?.into()
+                        self.builder()
+                            .build_and(lhs_nonzero, rhs_nonzero, "and")?
+                            .as_basic_value_enum()
                     },
                     BinaryOp::LogicalOr => {
                         let i32_type = self.context.i32_type();
@@ -818,7 +959,115 @@ impl<'ctx> CodeGenerator<'ctx> {
                             zero,
                             "rhs_nz",
                         )?;
-                        self.builder().build_or(lhs_nonzero, rhs_nonzero, "or")?.into()
+                        self.builder()
+                            .build_or(lhs_nonzero, rhs_nonzero, "or")?
+                            .as_basic_value_enum()
+                    },
+                    BinaryOp::Concat => {
+                        // 字符串拼接
+                        let i32_type = self.context.i32_type();
+                        let i8_ptr_type = self.context.ptr_type(AddressSpace::default());
+
+                        // 将操作数转换为指针
+                        let lhs_ptr = if lhs.is_pointer_value() {
+                            lhs.into_pointer_value()
+                        } else if lhs.is_int_value() {
+                            self.builder().build_int_to_ptr(
+                                lhs.into_int_value(),
+                                i8_ptr_type,
+                                "lhs_ptr",
+                            )?
+                        } else {
+                            return Err(CodegenError {
+                                message: "Cannot concat non-pointer value".to_string(),
+                            });
+                        };
+                        let rhs_ptr = if rhs.is_pointer_value() {
+                            rhs.into_pointer_value()
+                        } else if rhs.is_int_value() {
+                            self.builder().build_int_to_ptr(
+                                rhs.into_int_value(),
+                                i8_ptr_type,
+                                "rhs_ptr",
+                            )?
+                        } else {
+                            return Err(CodegenError {
+                                message: "Cannot concat non-pointer value".to_string(),
+                            });
+                        };
+
+                        // 获取字符串长度
+                        let strlen_fn = self.module.get_function("strlen").ok_or_else(|| {
+                            CodegenError { message: "strlen function not found".to_string() }
+                        })?;
+
+                        let lhs_len_call = self.builder().build_call(
+                            strlen_fn,
+                            &[lhs_ptr.as_basic_value_enum().into()],
+                            "strlen_lhs",
+                        )?;
+                        let lhs_len =
+                            lhs_len_call.try_as_basic_value().unwrap_basic().into_int_value();
+
+                        let rhs_len_call = self.builder().build_call(
+                            strlen_fn,
+                            &[rhs_ptr.as_basic_value_enum().into()],
+                            "strlen_rhs",
+                        )?;
+                        let rhs_len =
+                            rhs_len_call.try_as_basic_value().unwrap_basic().into_int_value();
+
+                        // 计算总长度
+                        let lhs_len_i32 =
+                            self.builder().build_int_s_extend(lhs_len, i32_type, "lhs_len_i32")?;
+                        let rhs_len_i32 =
+                            self.builder().build_int_s_extend(rhs_len, i32_type, "rhs_len_i32")?;
+                        let one = i32_type.const_int(1, false);
+                        let total_len_1 =
+                            self.builder().build_int_add(lhs_len_i32, rhs_len_i32, "len_sum")?;
+                        let total_len =
+                            self.builder().build_int_add(total_len_1, one, "total_len")?;
+
+                        // 分配内存
+                        let malloc_fn = self.module.get_function("malloc").ok_or_else(|| {
+                            CodegenError { message: "malloc function not found".to_string() }
+                        })?;
+                        let malloc_call = self.builder().build_call(
+                            malloc_fn,
+                            &[total_len.as_basic_value_enum().into()],
+                            "malloc_result",
+                        )?;
+                        let allocated_ptr =
+                            malloc_call.try_as_basic_value().unwrap_basic().into_pointer_value();
+
+                        // 复制字符串
+                        let strcpy_fn = self.module.get_function("strcpy").ok_or_else(|| {
+                            CodegenError { message: "strcpy function not found".to_string() }
+                        })?;
+                        self.builder().build_call(
+                            strcpy_fn,
+                            &[
+                                allocated_ptr.as_basic_value_enum().into(),
+                                lhs_ptr.as_basic_value_enum().into(),
+                            ],
+                            "strcpy_result",
+                        )?;
+
+                        // 连接字符串
+                        let strcat_fn = self.module.get_function("strcat").ok_or_else(|| {
+                            CodegenError { message: "strcat function not found".to_string() }
+                        })?;
+                        self.builder().build_call(
+                            strcat_fn,
+                            &[
+                                allocated_ptr.as_basic_value_enum().into(),
+                                rhs_ptr.as_basic_value_enum().into(),
+                            ],
+                            "strcat_result",
+                        )?;
+
+                        // 返回结果指针
+                        allocated_ptr.as_basic_value_enum()
                     },
                     _ => {
                         return Err(CodegenError {
@@ -911,8 +1160,25 @@ impl<'ctx> CodeGenerator<'ctx> {
                 }
             },
             Expression::Call { callee, arguments, span: _ } => {
+                // 处理成员调用 (io.println, obj.method 等)
                 let callee_name = match callee.as_ref() {
-                    Expression::Identifier(name, _) => name.clone(),
+                    Expression::Identifier(name, _) => {
+                        // 直接函数调用
+                        name.clone()
+                    },
+                    Expression::Member { object, member, .. } => {
+                        // 成员调用 (io.println)
+                        // 检查对象是否是标识符
+                        if let Expression::Identifier(ns, _) = object.as_ref() {
+                            // 命名空间调用 (io.println -> std_io_println)
+                            format!("{}_{}", ns, member)
+                        } else {
+                            // 对象的成员方法调用
+                            return Err(CodegenError {
+                                message: "Object method calls not supported yet".to_string(),
+                            });
+                        }
+                    },
                     _ => {
                         return Err(CodegenError {
                             message: "Only function name calls supported".to_string(),
@@ -920,8 +1186,11 @@ impl<'ctx> CodeGenerator<'ctx> {
                     },
                 };
 
-                // 处理内置函数
-                if callee_name == "println" || callee_name == "console.log" {
+                // 处理内置函数 (包括命名空间形式的调用如 io.println)
+                if callee_name == "println"
+                    || callee_name == "console.log"
+                    || callee_name.starts_with("io_")
+                {
                     // 简化处理: println/console.log 只支持一个字符串参数
                     let puts_fn = self.module.get_function("puts").ok_or_else(|| CodegenError {
                         message: "puts function not found".to_string(),
@@ -1386,6 +1655,30 @@ impl<'ctx> CodeGenerator<'ctx> {
             },
             Type::Object(_) => self.context.ptr_type(AddressSpace::default()).into(),
         }
+    }
+
+    /// 声明导入的函数
+    fn declare_imported_function(
+        &mut self,
+        func: &nexa_parser::ast::Function,
+    ) -> Result<(), CodegenError> {
+        // 检查函数是否已存在
+        if self.module.get_function(&func.name).is_some() {
+            return Ok(());
+        }
+
+        // 获取参数类型
+        let param_types: Vec<inkwell::types::BasicMetadataTypeEnum> =
+            func.parameters.iter().map(|p| self.map_type(&p.type_annotation).into()).collect();
+
+        // 获取返回类型
+        let return_type = self.map_type(&func.return_type);
+        let fn_type = return_type.fn_type(&param_types, false);
+
+        // 添加函数声明
+        self.module.add_function(&func.name, fn_type, None);
+
+        Ok(())
     }
 
     /// 生成 switch 表达式

@@ -6,7 +6,7 @@ use inkwell::context::Context;
 use inkwell::targets::Target;
 use inkwell::OptimizationLevel;
 use nexa_codegen::CodeGenerator;
-use nexa_parser::{Parser, Program};
+use nexa_parser::{ModuleLoader, Parser, Program};
 use std::process::Command;
 
 /// 打印解析错误，包含源码位置上下文
@@ -66,6 +66,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Nexa compiler v0.1.0");
     println!("Compiling: {}", cli.source_file);
 
+    // 创建模块加载器
+    let mut module_loader = ModuleLoader::new();
+
     // 读取源文件
     let source = std::fs::read_to_string(&cli.source_file)?;
 
@@ -79,6 +82,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     };
 
+    // 加载并解析导入的模块
+    let mut imported_symbols: Option<nexa_parser::module::SymbolTable> = None;
+    if !program.imports.is_empty() {
+        println!("Loading {} module(s)...", program.imports.len());
+        match module_loader.resolve_imports(&program) {
+            Ok(import_symbols_map) => {
+                println!("Loaded modules: {:?}", import_symbols_map.keys().collect::<Vec<_>>());
+                // 将第一个模块的符号表传递给代码生成器
+                if let Some((_, symbols)) = import_symbols_map.iter().next() {
+                    imported_symbols = Some(symbols.clone());
+                }
+            },
+            Err(e) => {
+                eprintln!("Warning: Failed to resolve imports: {:?}", e);
+            },
+        }
+    }
+
     println!("Parsed {} functions", program.functions.len());
 
     // 调试：打印 AST
@@ -91,7 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // 编译并执行
-    compile_and_execute(&program, &cli)?;
+    compile_and_execute(&program, &cli, imported_symbols)?;
 
     Ok(())
 }
@@ -232,6 +253,7 @@ fn parse_args(args: &[String]) -> Result<CliOptions, Box<dyn std::error::Error>>
 fn compile_and_execute(
     program: &Program,
     cli: &CliOptions,
+    imported_symbols: Option<nexa_parser::module::SymbolTable>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 初始化 LLVM 目标
     Target::initialize_native(&Default::default())?;
@@ -239,6 +261,15 @@ fn compile_and_execute(
     // 创建 LLVM 上下文和模块
     let context = Context::create();
     let mut codegen = CodeGenerator::new(&context, "nexa_module");
+
+    // 设置导入的符号
+    if let Some(symbols) = imported_symbols {
+        // 将符号表转换为 HashMap 格式
+        let mut imported: std::collections::HashMap<String, nexa_parser::module::SymbolTable> =
+            std::collections::HashMap::new();
+        imported.insert("main".to_string(), symbols);
+        codegen.set_imported_symbols(imported);
+    }
 
     // 声明内置函数
     codegen.declare_builtin_functions();
@@ -338,10 +369,53 @@ fn compile_and_execute(
                     )
                     .map_err(|e| format!("Failed to write object file: {}", e))?;
 
-                let link_status =
-                    Command::new("clang").arg(&object_file).arg("-o").arg(output).status()?;
+                // 编译运行时库
+                let runtime_obj = temp_dir.join("nexa_std.o");
+                // 从当前工作目录查找运行时文件
+                let runtime_c = std::env::current_dir()
+                    .map_err(|e| format!("Failed to get current dir: {}", e))?
+                    .join("compiler/nexac/runtime/nexa_std.c");
+
+                let compile_status = Command::new("clang")
+                    .args(["-c", "-O2", "-o"])
+                    .arg(&runtime_obj)
+                    .arg(&runtime_c)
+                    .status();
+
+                match &compile_status {
+                    Ok(status) => {
+                        if !status.success() {
+                            // 运行时编译失败，回退到直接链接
+                            let link_status = Command::new("clang")
+                                .arg(&object_file)
+                                .arg("-o")
+                                .arg(output)
+                                .status()?;
+
+                            let _ = std::fs::remove_file(&object_file);
+                            if link_status.success() {
+                                println!("\nCompiled to executable: {}", output);
+                            } else {
+                                return Err("Linker failed to produce executable".into());
+                            }
+                            return Ok(());
+                        }
+                    },
+                    Err(e) => {
+                        return Err(format!("Failed to compile runtime: {}", e).into());
+                    },
+                }
+
+                // 链接运行时库
+                let link_status = Command::new("clang")
+                    .arg(&object_file)
+                    .arg(&runtime_obj)
+                    .arg("-o")
+                    .arg(output)
+                    .status()?;
 
                 let _ = std::fs::remove_file(&object_file);
+                let _ = std::fs::remove_file(&runtime_obj);
 
                 if link_status.success() {
                     println!("\nCompiled to executable: {}", output);
